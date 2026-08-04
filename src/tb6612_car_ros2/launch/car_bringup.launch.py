@@ -64,4 +64,5 @@ ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
 
 '''
 ros2 launch your_package xxx.launch.py transport:=serial
+ros2 launch tb6612_car_ros2 car_bringup.launch.py transport:=udp4 udp_port:=8888
 '''
