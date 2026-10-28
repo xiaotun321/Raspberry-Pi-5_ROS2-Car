@@ -4,4 +4,6 @@
 namespace tb6612 {
 inline constexpr char kVersion[] = "@CAR_VERSION@";
 inline constexpr char kGitCommit[] = "@CAR_GIT_COMMIT@";
+// 静态打包校验使用此标记；--version 引用它，确保编译后仍保留在程序内。
+inline constexpr char kBuildIdentity[] = "TB6612_BUILD:@CAR_VERSION@:@CAR_GIT_COMMIT@";
 }  // namespace tb6612

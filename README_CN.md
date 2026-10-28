@@ -266,7 +266,7 @@ systemd 负责开机运行和 daemon 自身崩溃后的重启，并把输出收�
 
 ### 1. 编译一个版本
 
-在目标架构的 Ubuntu 24.04 / ROS 2 Jazzy 环境执行，树莓派 5 使用 arm64：
+在 Ubuntu 24.04 / ROS 2 Jazzy 环境执行，树莓派 5 使用 arm64：
 
 ```bash
 bash version/autogen.sh 1.0.0
@@ -279,20 +279,83 @@ version/out/tb6612-car_1.0.0_arm64.ver
 version/out/tb6612-car-bootstrap.tar.gz
 ```
 
-普通 x86_64 Linux 主机只能原生生成 amd64 包，用于该主机测试：
+x86_64 Linux 主机原生生成 amd64 包用于本机测试时，显式指定架构：
 
 ```bash
 bash version/autogen.sh 1.0.0 amd64
 ```
 
-amd64 包不能用于树莓派。脚本会拒绝把 x86_64 产物标记为 arm64；若在电脑上
-编译树莓派版本，应使用配好 Jazzy 的 arm64 构建环境，或直接在树莓派构建。
-当前脚本不提供跨架构工具链或 sysroot。首次构建依赖见前文，打包还需 `dpkg-dev`、
+amd64 包不能用于树莓派。在 x86_64 主机上选择默认 arm64 时，脚本会自动进入
+下面的交叉编译流程。首次构建依赖见前文，打包还需 `dpkg-dev`、
 `bzip2`、`python3`、`tar`。每次使用新的版本号；`version.json` 同时记录 Git 提交、
 源码是否有未提交修改、构建时间和架构。程序支持 `--version`。
 
 每次构建使用独立 `target/` 子目录，禁止发布目录中的符号链接依赖源码目录。
 这些目录会保留以便排查构建问题，可在确认不需要后自行清理。
+
+#### x86_64 主机交叉编译 ARM64
+
+`version/cross.conf` 默认配置你使用的 Arm GNU 10.3 工具链：
+
+```bash
+CAR_TOOLCHAIN_ROOT="$HOME/gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu"
+CAR_CROSS_PREFIX="$CAR_TOOLCHAIN_ROOT/bin/aarch64-none-linux-gnu-"
+CAR_SYSROOT="$HOME/rpi5-sysroot"
+```
+
+**主机的 `/opt/ros/jazzy` 不是 ARM64 sysroot。** 它提供主机运行的构建工具；
+目标头文件和库必须来自开发板。sysroot 是开发板文件系统的本地副本，应至少包含：
+
+```text
+rpi5-sysroot/
+├── opt/ros/jazzy/               # ARM64 ROS 库、头文件、CMake 配置
+├── usr/include/                # 开发板系统头文件
+├── usr/lib/aarch64-linux-gnu/   # glibc 等目标系统库
+├── usr/lib/gcc/aarch64-linux-gnu/ # 目标 libstdc++.so 开发链接
+└── lib/                        # 系统库/加载器，可能链接到 usr/lib
+```
+
+主机与开发板均需安装 rsync。开发板需要 Jazzy、rclcpp、geometry_msgs 和 g++
+开发文件，不能只复制一个缺少头文件的运行环境。首次在主机仓库根目录同步：
+
+```bash
+sudo apt install rsync
+bash version/sync_sysroot.sh shuaijie@开发板IP
+```
+
+脚本只读取开发板，复制 `/usr`、`/opt/ros/jazzy` 和系统库；它将副本中的绝对
+符号链接转换成相对链接，防止误指向主机库。目标目录已存在时拒绝覆盖；更新副本
+可指定新目录，然后修改 `cross.conf` 的 `CAR_SYSROOT`。整个 `/usr` 可能较大，
+需预留空间并等待同步完成。也可通过环境变量指定已准备好的完整 sysroot：
+
+```bash
+CAR_SYSROOT=/home/shuaijie/board-sysroot bash version/autogen.sh 1.0.0.0t
+```
+
+使用默认路径时，在你当前的 `version` 目录直接执行：
+
+```bash
+bash autogen.sh 1.0.0.0t
+```
+
+生成 `version/out/tb6612-car_1.0.0.0t_arm64.ver`。`1.0.0.0t` 在构建、打包和
+更新器中均为有效版本号。交叉构建的行为是：
+
+1. 核对编译器目标、sysroot 的 ROS 库架构，并实际链接一个 ARM64 C++ 小程序。
+2. 使用主机 g++ 编译并运行控制逻辑、更新器和 daemon 测试。
+3. 使用 `cmake/toolchain_aarch64.cmake` 编译 ARM64 应用，不运行 ARM 程序。
+4. 打包前读取 ELF 头与嵌入的版本/提交标记，避免把 x86 程序或旧版本装入 ARM 包。
+
+主机测试不能替代开发板测试。GCC 10.3 与开发板较新的 glibc/libstdc++ 或 ROS
+头文件未必兼容；若预检查失败，查看输出及 `target/release.*/probe/link.log`。
+应修正 sysroot 或使用与开发板匹配的工具链，不要跳过链接错误。若主机安装了
+Ubuntu 的 AArch64 交叉编译器，可显式切换，例如：
+
+```bash
+CAR_CROSS_PREFIX=/usr/bin/aarch64-linux-gnu- bash version/autogen.sh 1.0.0.0t
+```
+
+该方式仍然需要开发板 sysroot；不会复用主机的 x86 ROS 库。
 
 ### 2. 首次初始化开发板（仅一次）
 

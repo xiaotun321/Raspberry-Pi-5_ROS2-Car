@@ -103,6 +103,7 @@ class ArchiveTests(unittest.TestCase):
         good = dict(product="tb6612-car", format=1, architecture="arm64",
                     version="1.0.0", ros_distro="jazzy", commit="abc123")
         updater.validate_manifest(good, "arm64", "1.0.0")
+        updater.validate_manifest(dict(good, version="1.0.0.0t"), "arm64", "1.0.0.0t")
         for key, value in (("architecture", "amd64"), ("product", "hs411"),
                            ("version", "2.0.0"), ("ros_distro", "humble")):
             with self.subTest(key=key), self.assertRaises(ValueError):

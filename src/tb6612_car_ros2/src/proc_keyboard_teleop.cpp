@@ -60,6 +60,7 @@ int main(int argc, char** argv) {
   if (argc == 2 && std::strcmp(argv[1], "--version") == 0) {
     std::printf("keyboard_teleop %s (%s)\n", tb6612::kVersion,
                 tb6612::kGitCommit);
+    std::puts(tb6612::kBuildIdentity);
     return 0;
   }
   std::shared_ptr<KeyboardTeleop> node;

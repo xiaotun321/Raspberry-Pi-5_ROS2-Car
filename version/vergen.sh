@@ -10,10 +10,10 @@ commit="${4:?}"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+~][A-Za-z0-9.]+)?$ ]] || exit 2
 [[ "$arch" == arm64 || "$arch" == amd64 ]] || exit 2
 [[ "$commit" =~ ^[A-Za-z0-9._-]+$ ]] || exit 2
-[[ "$(dpkg --print-architecture)" == "$arch" ]] || exit 2
-# 确认打包的是指定版本的二进制，避免版本清单与程序不一致。
+# 静态核对架构与嵌入版本，允许在 x86 主机打包 ARM 程序。
 for executable in keyboard_teleop car_daemon; do
-  "$prefix/lib/tb6612_car_ros2/$executable" --version | grep -F " $version ($commit)"
+  python3 "$repo/version/verify_binary.py" \
+    "$prefix/lib/tb6612_car_ros2/$executable" "$arch" "$version" "$commit"
 done
 mkdir -p "$repo/target" "$repo/version/out"
 touch "$repo/target/COLCON_IGNORE"

@@ -11,6 +11,8 @@ add_test(NAME teleop_control COMMAND test_teleop_control)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME version_archive
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../../../version/test_update.py)
+add_test(NAME binary_metadata
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../../../version/test_binary.py)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   # 独立测试模式也可编译 daemon，无需安装 ROS 2。
   if(NOT TARGET car_daemon)
