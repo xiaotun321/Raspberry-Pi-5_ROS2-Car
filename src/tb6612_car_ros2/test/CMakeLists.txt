@@ -7,3 +7,23 @@ add_executable(test_teleop_control test_teleop_control.cpp)
 target_compile_features(test_teleop_control PRIVATE cxx_std_17)
 target_include_directories(test_teleop_control PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../common)
 add_test(NAME teleop_control COMMAND test_teleop_control)
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME version_archive
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../../../version/test_update.py)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # 独立测试模式也可编译 daemon，无需安装 ROS 2。
+  if(NOT TARGET car_daemon)
+    set(CAR_VERSION "test")
+    set(CAR_GIT_COMMIT "test")
+    configure_file(../../common/build_version.hpp.in generated/build_version.hpp @ONLY)
+    find_package(Threads REQUIRED)
+    add_executable(car_daemon ../src/proc_daemon.cpp)
+    target_compile_features(car_daemon PRIVATE cxx_std_17)
+    target_include_directories(car_daemon PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
+    target_link_libraries(car_daemon PRIVATE Threads::Threads)
+  endif()
+  add_test(NAME daemon_lifecycle
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_daemon.py $<TARGET_FILE:car_daemon>)
+  set_tests_properties(daemon_lifecycle PROPERTIES TIMEOUT 60)
+endif()

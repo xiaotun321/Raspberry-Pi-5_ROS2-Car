@@ -1,0 +1,24 @@
+# systemd 守护 C++ daemon；daemon 再守护 Agent，退出时清理整个进程组。
+[Unit]
+Description=TB6612 ROS 2 car supervisor and boot updater
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=/work
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStartPre=/bin/bash /work/car-bootstrap/vmonitor.sh
+ExecStart=/bin/bash /work/app/daemon/boot_apps.sh
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=300
+TimeoutStopSec=15
+KillMode=control-group
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tb6612-car
+
+[Install]
+WantedBy=multi-user.target

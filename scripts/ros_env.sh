@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Source this file to keep the environment in the caller's shell.
+# 加载源码工作区的 ROS 环境；默认 Jazzy、ROS_DOMAIN_ID=0。
+# 用法：source scripts/ros_env.sh；用 source 才能保留当前终端的环境变量。
 car_workspace="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 car_ros_setup="/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
 if [[ ! -f "$car_ros_setup" ]]; then

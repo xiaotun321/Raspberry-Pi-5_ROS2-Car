@@ -1,0 +1,7 @@
+#pragma once
+
+// 由 CMake 在编译时生成，版本号与发布包中的 version.json 对应。
+namespace tb6612 {
+inline constexpr char kVersion[] = "@CAR_VERSION@";
+inline constexpr char kGitCommit[] = "@CAR_GIT_COMMIT@";
+}  // namespace tb6612

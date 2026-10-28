@@ -1,9 +1,11 @@
 #include <csignal>
 #include <cstdio>
+#include <cstring>
 #include <geometry_msgs/msg/twist.hpp>
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
 
+#include "build_version.hpp"
 #include "teleop_control.hpp"
 #include "terminal.hpp"
 
@@ -55,6 +57,11 @@ class KeyboardTeleop : public rclcpp::Node {
 }  // namespace
 
 int main(int argc, char** argv) {
+  if (argc == 2 && std::strcmp(argv[1], "--version") == 0) {
+    std::printf("keyboard_teleop %s (%s)\n", tb6612::kVersion,
+                tb6612::kGitCommit);
+    return 0;
+  }
   std::shared_ptr<KeyboardTeleop> node;
   int result = 0;
 
