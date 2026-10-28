@@ -26,7 +26,7 @@ setup(
     ],    
     entry_points={
         'console_scripts': [
-            'keyboard_teleop = tb6612_car_ros2.teleop:main',
+            'keyboard_teleop = tb6612_car_ros2.keyboard_teleop:main',
         ],
     },
 )

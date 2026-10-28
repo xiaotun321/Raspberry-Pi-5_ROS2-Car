@@ -3,6 +3,8 @@ import select
 import sys
 import termios
 import tty
+import time
+import math
 
 import rclpy
 from geometry_msgs.msg import Twist  # 几何消息包 geometry_msgs 中的标准速度消息类型 TWist
@@ -20,6 +22,8 @@ ESP32-S3 TB6612 小车键盘控制
   z/c：增加/减小角速度
   空格：停止
   Ctrl-C：退出
+  按住方向键移动；最后一次方向按键后 0.6 秒自动停车。
+  以 10 Hz 刷新命令；s/空格立即发停止。
 '''
 
 
@@ -29,7 +33,13 @@ class KeyboardTeleop(Node):
         self.publisher = self.create_publisher(Twist, 'cmd_vel', 10) # 创建 /cmd_vel 发布者对象（消息类型、话题名、队列长度(用作缓存)）
                                                                      # 节点之间通过消息传输数据 Twist 就是数据类型
         self.linear_speed = 0.15    # 线速度
-        self.angular_speed = 0.8    # 角速度
+        self.angular_speed = 0.8    # 开环指令值，不是实测速度
+        self.key_timeout = float(self.declare_parameter('key_timeout', 0.6).value)
+        if not math.isfinite(self.key_timeout) or not 0 < self.key_timeout <= 5:
+            raise ValueError('key_timeout must be >0 and <=5 seconds')
+        self.target = (0.0, 0.0)
+        self.last_motion_key = time.monotonic()
+        self.timer = self.create_timer(0.1, self.publish_current)
 
     def publish(self, linear=0.0, angular=0.0):
         msg = Twist()
@@ -37,21 +47,31 @@ class KeyboardTeleop(Node):
         msg.angular.z = float(angular)
         self.publisher.publish(msg)     # 发布话题消息
 
-    # 将按键转换成速度   
+    def set_motion(self, linear=0.0, angular=0.0):
+        self.target = (linear, angular)
+        self.last_motion_key = time.monotonic()
+        self.publish(*self.target)
+
+    def publish_current(self):
+        if time.monotonic() - self.last_motion_key >= self.key_timeout:
+            self.target = (0.0, 0.0)
+        self.publish(*self.target)
+
+    # 将按键转换成开环运动指令
     '''
-    每检查到一次有用的按键, 就发布一次话题消息,订阅者收到消息执行回调函数处理(话题通信特性是单向传输,适合连续变化的数据传递)
+    方向键更新运动目标，定时器以 10 Hz 刷新；没有新的方向按键时超时清零。
     '''
     def handle_key(self, key):
         if key == 'w':
-            self.publish(self.linear_speed, 0.0)
+            self.set_motion(self.linear_speed, 0.0)
         elif key == 'x':
-            self.publish(-self.linear_speed, 0.0)
+            self.set_motion(-self.linear_speed, 0.0)
         elif key == 'a':
-            self.publish(0.0, self.angular_speed)
+            self.set_motion(0.0, self.angular_speed)
         elif key == 'd':
-            self.publish(0.0, -self.angular_speed)
+            self.set_motion(0.0, -self.angular_speed)
         elif key in ('s', ' '):
-            self.publish()
+            self.set_motion()
         elif key == 'q':
             self.linear_speed = min(0.50, self.linear_speed + 0.02)
         elif key == 'e':
