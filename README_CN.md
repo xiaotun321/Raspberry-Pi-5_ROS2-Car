@@ -31,20 +31,96 @@ scripts/
 
 ## 构建
 
-在已安装 ROS 2 Jazzy、colcon、rosdep 以及 `micro_ros_agent` 的 Linux 主机执行：
+在已安装 ROS 2 Jazzy、colcon 和 rosdep 的 Linux 主机执行。
+`micro_ros_agent` 是启动 Agent 所需的运行时依赖，不参与键盘节点的 C++ 编译。
+若 rosdep 无法解析此名称，先跳过该项，按下节单独安装 Agent；不要删除
+`package.xml` 中的运行时依赖声明。
 
 ```bash
 cd Raspberry-Pi-5_ROS2-Car
 source /opt/ros/jazzy/setup.bash
-rosdep install --from-paths src --ignore-src -r -y
-colcon build --packages-select tb6612_car_ros2 --symlink-install
-source install/setup.bash
+rosdep install --from-paths src --ignore-src --skip-keys micro_ros_agent -y
+colcon build --packages-select tb6612_car_ros2 --symlink-install && source scripts/ros_env.sh
 ```
 
 保留整个仓库的 `src/common` 和功能包目录。由旧 Python 包升级时，请先清理
 旧工作区生成的 `build/tb6612_car_ros2`、`install/tb6612_car_ros2` 后重新构建，
 在新终端加载环境，避免继续运行旧 Python 入口。如果使用 merged install，
 建议使用全新的工作区构建目录和安装目录。
+
+### 安装 micro-ROS Agent（Jazzy）
+
+先执行 `ros2 pkg prefix micro_ros_agent`。如果能找到包，可直接使用；
+如果此前已在其他工作区安装，需要先 source 那个工作区的 `install/setup.bash`。
+`rosdep --skip-keys` 只跳过依赖解析，不会安装 Agent。
+
+尚未安装时，参考 [micro_ros_setup 官方 Jazzy 说明](https://github.com/micro-ROS/micro_ros_setup/tree/jazzy#building-micro-ros-agent)，
+在独立工作区构建（以下目录用于首次安装）：
+
+```bash
+source /opt/ros/jazzy/setup.bash
+mkdir -p ~/microros_ws/src
+cd ~/microros_ws
+git clone -b jazzy https://github.com/micro-ROS/micro_ros_setup.git src/micro_ros_setup
+rosdep update
+rosdep install --from-paths src --ignore-src -y
+colcon build --packages-select micro_ros_setup && source install/local_setup.bash
+ros2 run micro_ros_setup create_agent_ws.sh
+ros2 run micro_ros_setup build_agent.sh && source install/local_setup.bash
+ros2 pkg prefix micro_ros_agent
+```
+
+每一步成功后再执行下一步。启动 Agent 的新终端加载两个工作区：
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source ~/microros_ws/install/setup.bash
+cd ~/Projects/Raspberry-Pi-5_ROS2-Car
+source install/local_setup.bash
+bash scripts/ros_launch.sh transport:=udp4 udp_port:=8888
+```
+
+### 构建错误排查
+
+若出现 `target_link_libraries` 的 keyword/plain 混用错误，确认代码为：
+
+```cmake
+target_link_libraries(keyboard_teleop PRIVATE common)
+ament_target_dependencies(keyboard_teleop PUBLIC rclcpp geometry_msgs)
+```
+
+Jazzy 的 `ament_target_dependencies` 需要显式 `PUBLIC` 才会在内部链接调用中
+使用关键字形式。更新后重新运行 colcon 即可；必要时添加 `--cmake-clean-cache`。
+只有构建成功后才加载环境。若已有 `Finished <<< tb6612_car_ros2`，但缺少
+`install/setup.bash`，应排查 colcon 的环境脚本生成，而不是重新修改 C++ 代码。
+包内脚本与工作区顶层脚本由不同层负责，包内脚本存在不代表顶层脚本一定已生成。
+
+可先加载日志中已经安装的包内环境（默认隔离安装布局）：
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/tb6612_car_ros2/share/tb6612_car_ros2/local_setup.bash
+ros2 pkg prefix tb6612_car_ros2
+ros2 run tb6612_car_ros2 keyboard_teleop
+```
+
+`scripts/ros_env.sh` 也支持这种回退，以及 merged install 的包内脚本。
+单包回退不负责加载 micro-ROS Agent 所在的其他工作区。
+
+顶层脚本缺失可能是 colcon Bash 扩展未安装、未加载或混用了不同安装来源。
+Ubuntu apt 安装方式可先补齐官方推荐的常用扩展，再用系统 colcon 构建：
+
+```bash
+sudo apt update
+sudo apt install python3-colcon-common-extensions python3-colcon-bash
+source /opt/ros/jazzy/setup.bash
+/usr/bin/colcon build --packages-select tb6612_car_ros2 --symlink-install
+ls -l install/setup.bash install/local_setup.bash
+```
+
+若仍缺失，检查 `type -a colcon`、`/usr/bin/colcon extensions` 和
+`printenv COLCON_EXTENSION_BLOCKLIST`，以及 `log/latest_build/logger_all.log` 中的
+扩展加载错误。此时无需删除已编译成功的可执行文件。
 
 ## 运行
 

@@ -30,7 +30,8 @@ target_include_directories(common INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/../commo
 
 add_executable(keyboard_teleop src/proc_keyboard_teleop.cpp)
 target_link_libraries(keyboard_teleop PRIVATE common)
-ament_target_dependencies(keyboard_teleop rclcpp geometry_msgs)
+# 显式指定 PUBLIC，避免 ament 内部链接调用与上面的 PRIVATE 关键字写法混用。
+ament_target_dependencies(keyboard_teleop PUBLIC rclcpp geometry_msgs)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(keyboard_teleop PRIVATE -Wall -Wextra -Wpedantic)
 endif()
