@@ -1,0 +1,14 @@
+# 基础格式风格；未显式配置的选项沿用 Google 风格
+BasedOnStyle: Google
+# 每行最大列数，超过时由格式化工具按语法选择合适的换行位置
+ColumnLimit: 80
+# 普通缩进宽度（空格数）
+IndentWidth: 2
+# 不将短函数定义压缩为单行，函数体单独换行
+AllowShortFunctionsOnASingleLine: None
+# 不将短 if 语句及其执行语句放在同一行
+AllowShortIfStatementsOnASingleLine: Never
+# 不将短循环及其循环体压缩为单行
+AllowShortLoopsOnASingleLine: false
+# 不将 case 标签及其执行语句压缩为单行
+AllowShortCaseLabelsOnASingleLine: false

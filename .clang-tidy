@@ -1,0 +1,39 @@
+---
+# 参照 hs411 按类别选择检查项，聚焦当前 C++17 / ROS 2 项目。
+# 使用逗号分隔的字符串，兼容本地 clang-tidy 12 和较新的版本。
+# -*：关闭默认检查，下面显式启用需要的规则。
+# clang-analyzer-*：检查空指针、未初始化值、资源泄漏等潜在错误。
+# bugprone-*（下方选定项）：检查悬空句柄、错误的 sizeof、移动后使用、
+# 临时 RAII 对象及 POSIX 返回值比较等容易出错的写法。
+# cppcoreguidelines-*（下方选定项）：检查成员初始化与对象切片。
+# modernize-*（下方选定项）：推荐 nullptr、override 和 = delete 写法。
+# performance-*（下方选定项）：检查范围循环和初始化中不必要的复制。
+# readability-*（下方选定项）：检查控制语句大括号和误导性缩进。
+Checks: >-
+  -*,
+  clang-analyzer-*,
+  bugprone-dangling-handle,
+  bugprone-sizeof-expression,
+  bugprone-use-after-move,
+  bugprone-unused-raii,
+  bugprone-posix-return,
+  cppcoreguidelines-pro-type-member-init,
+  cppcoreguidelines-slicing,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-equals-delete,
+  performance-for-range-copy,
+  performance-unnecessary-copy-initialization,
+  readability-braces-around-statements,
+  readability-misleading-indentation
+
+# 默认不输出系统头文件中的检查警告；仍会解析这些头文件以理解代码。
+# 不设置新版专用的系统头文件选项，以兼容本地 clang-tidy 12。
+# 仅显示本项目公共头文件和功能包头文件的诊断，兼容绝对路径及两种路径分隔符。
+# 主源文件中的诊断始终显示，不受该过滤器限制。
+HeaderFilterRegex: '(^|[/\\])src[/\\](common|tb6612_car_ros2)[/\\]'
+# 初期将检查结果作为警告，不统一提升为编译错误。
+WarningsAsErrors: ''
+# 只有显式请求自动修复时，修改区域才使用本地 .clang-format 排版。
+FormatStyle: file
+...
