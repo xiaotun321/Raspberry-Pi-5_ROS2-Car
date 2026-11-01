@@ -9,6 +9,26 @@ if [[ ! -f "$car_ros_setup" ]]; then
 fi
 source "$car_ros_setup" || return 1
 
+# Agent 可能安装在独立工作区，与发布版 runtime_env.sh 使用同一个配置项。
+# 未显式配置时，尝试 micro_ros_setup 文档里的两个常见安装位置。
+car_agent_setup="${MICRO_ROS_AGENT_SETUP:-}"
+if [[ -z "$car_agent_setup" ]]; then
+  for car_agent_candidate in "$HOME/microros_ws/install/setup.bash" \
+                            "/opt/microros_ws/install/setup.bash"; do
+    if [[ -f "$car_agent_candidate" ]]; then
+      car_agent_setup="$car_agent_candidate"
+      break
+    fi
+  done
+fi
+if [[ -n "$car_agent_setup" ]]; then
+  if [[ ! -f "$car_agent_setup" ]]; then
+    echo "Missing Agent setup: $car_agent_setup" >&2
+    return 1
+  fi
+  source "$car_agent_setup" || return 1
+fi
+
 # 优先加载工作区环境；缺少顶层脚本时，兼容单包安装的环境脚本。
 # 单包回退不会自动加载其他工作区，micro-ROS Agent 环境需事先加载。
 car_package_setup="share/tb6612_car_ros2/local_setup.bash"
@@ -25,4 +45,4 @@ else
   return 1
 fi
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
-unset car_workspace car_ros_setup car_package_setup
+unset car_workspace car_ros_setup car_package_setup car_agent_setup car_agent_candidate

@@ -23,6 +23,10 @@ case "$action" in
     # 后续参数原样传给键盘节点，例如 --ros-args -p key_timeout:=0.8。
     exec /bin/bash /work/app/daemon/keyboard_teleop.sh "$@"
     ;;
+  web)
+    # 网页控制节点；浏览器访问 http://<本机IP>:8080/ 即可下发指令。
+    exec /bin/bash /work/app/daemon/web_teleop.sh "$@"
+    ;;
   rollback)
     # 先停服务再切换版本；拒绝存在待更新包时回退，避免启动后又被升级。
     [[ "$EUID" == 0 ]] || { echo "Use sudo carctl rollback" >&2; exit 1; }
@@ -36,7 +40,7 @@ case "$action" in
     systemctl start tb6612-car.service
     ;;
   *)
-    echo "Usage: carctl {start|stop|restart|status|logs|version|teleop|rollback}" >&2
+    echo "Usage: carctl {start|stop|restart|status|logs|version|teleop|web|rollback}" >&2
     exit 2
     ;;
 esac

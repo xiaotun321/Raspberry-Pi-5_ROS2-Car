@@ -38,7 +38,9 @@ if [[ -n "$agent_setup" ]]; then
   printf '\nMICRO_ROS_AGENT_SETUP=%q\n' "$agent_setup" >> /work/app/cfg/car.conf
 fi
 install -m 644 "$repo/scripts/tb6612-car.service" /etc/systemd/system/tb6612-car.service
+install -m 644 "$repo/scripts/tb6612-car-web.service" /etc/systemd/system/tb6612-car-web.service
 systemctl daemon-reload
 # 只设置开机自启；应用版本包投递并重启后才开始运行。
 systemctl enable tb6612-car.service
 echo "Bootstrap installed. Stage a release at /work/app/tmp/ver/1.ver, then reboot."
+echo "Web control (opt-in): systemctl enable --now tb6612-car-web.service"

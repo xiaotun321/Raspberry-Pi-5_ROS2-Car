@@ -2,7 +2,7 @@
 
 配套 ESP32-S3 TB6612 开环电机固件，目标环境为树莓派 Linux、ROS 2 Jazzy
 和 micro-ROS Jazzy。通过 `/cmd_vel`（`geometry_msgs/msg/Twist`）发送指令，
-默认使用 Wi-Fi UDP 8888。键盘节点使用 C++17 / rclcpp。
+默认使用 Wi-Fi UDP 8888。键盘和网页控制节点使用 C++17 / rclcpp。
 
 ## 代码组织
 
@@ -13,18 +13,22 @@ src/
 ├── common/
 │   ├── teleop_control.hpp        # 按键、速度限制、单调时钟超时控制
 │   ├── terminal.hpp              # POSIX 终端读取与自动恢复
+│   ├── http_server.hpp           # 极简 HTTP/1.1 服务器（仅 POSIX socket）
+│   ├── web_control_page.hpp      # 内嵌网页控制页面
 │   └── build_version.hpp.in      # 编译版本信息模板
 └── tb6612_car_ros2/
     ├── CMakeLists.txt
     ├── package.xml
     ├── src/proc_keyboard_teleop.cpp
+    ├── src/proc_web_teleop.cpp
     ├── src/proc_daemon.cpp
     ├── launch/car_bringup.launch.py
-    └── test/                    # 控制逻辑与守护进程测试
+    └── test/                    # 控制逻辑、HTTP 服务器与守护进程测试
 scripts/
 ├── ros_env.sh
 ├── ros_launch.sh
 ├── keyboard_teleop.sh
+├── web_teleop.sh
 ├── bootstrap.sh                 # 首次安装更新器和 systemd 服务
 ├── boot_apps.sh                 # 发布目录应用入口
 ├── carctl.sh                    # 日常启停、版本、日志和遥控命令
@@ -36,9 +40,10 @@ version/
 └── test_update.py               # 更新器回归测试
 ```
 
-`common` 为 CMake INTERFACE 目标，进程编译为 `keyboard_teleop`，安装至
-`lib/tb6612_car_ros2`，保持原有运行命令。launch Python 文件只负责
-启动 Agent，业务节点已改为 C++。工作区由 colcon 发现包，无需根目录 CMakeLists.txt。
+`common` 为 CMake INTERFACE 目标，进程编译为 `keyboard_teleop`、`web_teleop`
+和 `car_daemon`，安装至 `lib/tb6612_car_ros2`，保持原有运行命令。launch Python
+文件只负责启动 Agent，业务节点已改为 C++。工作区由 colcon 发现包，无需根目录
+CMakeLists.txt。
 
 ## 构建
 
@@ -67,6 +72,13 @@ colcon build --packages-select tb6612_car_ros2 --symlink-install && source scrip
 先执行 `ros2 pkg prefix micro_ros_agent`。如果能找到包，可直接使用；
 如果此前已在其他工作区安装，需要先 source 那个工作区的 `install/setup.bash`。
 `rosdep --skip-keys` 只跳过依赖解析，不会安装 Agent。
+
+`scripts/ros_env.sh` 会自动加载 Agent 工作区：优先使用 `MICRO_ROS_AGENT_SETUP`
+指定的路径，未指定时依次查找 `~/microros_ws/install/setup.bash` 和
+`/opt/microros_ws/install/setup.bash`（对应官方 micro_ros_setup 教程和
+`scripts/install_agent.sh` 的安装位置）。因此 `scripts/ros_launch.sh`、
+`scripts/keyboard_teleop.sh` 和 `scripts/web_teleop.sh` 在全新终端里也能直接
+找到 `micro_ros_agent`，不必手动 source Agent 工作区。
 
 尚未安装时，参考 [micro_ros_setup 官方 Jazzy 说明](https://github.com/micro-ROS/micro_ros_setup/tree/jazzy#building-micro-ros-agent)，
 在独立工作区构建（以下目录用于首次安装）：
@@ -108,6 +120,19 @@ Jazzy 的 `ament_target_dependencies` 需要显式 `PUBLIC` 才会在内部链�
 只有构建成功后才加载环境。若已有 `Finished <<< tb6612_car_ros2`，但缺少
 `install/setup.bash`，应排查 colcon 的环境脚本生成，而不是重新修改 C++ 代码。
 包内脚本与工作区顶层脚本由不同层负责，包内脚本存在不代表顶层脚本一定已生成。
+
+若报 `没有规则可制作目标"/opt/ros/jazzy/lib/libfastcdr.so.2.2.7"` 这类缺文件
+错误，说明系统升级过 `ros-jazzy-fastcdr` 等 ROS 依赖：ROS 的 CMake 配置把库的
+**带版本号**文件名写进了链接规则，而旧构建目录里仍是升级前的版本号；colcon 只在
+`CMakeLists.txt` 变化时才重新配置，不会因为外部依赖升级而重跑，于是复用了过期规则。
+清掉 CMake 缓存重新配置即可：
+
+```bash
+colcon build --packages-select tb6612_car_ros2 --symlink-install --cmake-clean-cache
+```
+
+彻底一点就删除 `build/tb6612_car_ros2` 和 `install/tb6612_car_ros2` 后重建，
+与升级工作区时的做法一致。
 
 可先加载日志中已经安装的包内环境（默认隔离安装布局）：
 
@@ -170,6 +195,44 @@ bash scripts/ros_launch.sh transport:=serial serial_port:=/dev/ttyACM0 baudrate:
 ESP32 的 `MICRO_ROS_AGENT_IP` 应配置为树莓派在同一局域网的地址，使用
 `hostname -I` 查看；端口和 ROS_DOMAIN_ID 也必须与两端配置一致。
 
+### 网页控制
+
+网页控制节点提供 HTTP 接口，浏览器访问树莓派 IP 即可代替键盘操作小车：
+
+```bash
+bash scripts/web_teleop.sh
+# 浏览器打开 http://<树莓派 IP>:8080/
+# 可选：改端口、监听地址或令牌
+bash scripts/web_teleop.sh --ros-args -p port:=8081 -p bind_address:=0.0.0.0
+```
+
+页面内嵌在可执行文件中，不依赖外部静态资源，断网的局域网也能直接打开。
+按住方向按钮持续下发指令，松开立即停车；也支持键盘 w/a/s/d/x 和空格。
+网页与键盘控制共用同一个 `/cmd_vel`，**不要同时使用**，否则两路指令会互相覆盖。
+
+网页节点只负责把界面操作转成 `/cmd_vel` 上的 Twist，不关心树莓派到 ESP32
+的物理链路：串口、Wi-Fi 或蓝牙都可以，只要 Pi 侧有组件把 `/cmd_vel`
+转发给 ESP32（micro-ROS Agent 的传输，或蓝牙桥接节点），网页指令就能到达电机。
+
+| 接口 | 方法 | 说明 |
+| --- | --- | --- |
+| `/` | GET | 返回控制页面 |
+| `/cmd` | POST | 正文 `linear=0.15&angular=0`，也接受 JSON |
+| `/cmd` | GET | 查询参数 `?linear=0.15&angular=0` |
+| `/stop` | POST | 立即停车 |
+| `/state` | GET | 当前指令 JSON |
+
+发布版可以用 `carctl web` 前台启动，或用可选的 systemd 服务常驻：
+
+```bash
+sudo systemctl enable --now tb6612-car-web.service
+```
+
+监听地址、端口和令牌在 `car.conf` 中配置（`WEB_BIND`、`WEB_PORT`、`WEB_TOKEN`）。
+`WEB_TOKEN` 非空时，命令必须携带令牌，页面地址写作
+`http://<树莓派 IP>:8080/?token=<令牌>`。该接口没有身份认证，等同于把
+小车遥控权交给整个局域网，请只在可信网络中使用。
+
 ## 控制行为
 
 | 按键 | 行为 |
@@ -185,6 +248,10 @@ ESP32 的 `MICRO_ROS_AGENT_IP` 应配置为树莓派在同一局域网的地址�
 刷新；最后一次方向键后默认 0.6 秒清零。按住按键依赖终端的按键重复。
 调速键在下一次方向键时生效，不延长运动超时；其他按键也不延长超时。
 超时使用单调时钟，不受 ROS 仿真时间或系统时间调整影响。
+
+网页控制复用同一套限幅和超时：网页下发的绝对速度按线速度 ±0.50、
+角速度 ±2.5 裁剪，非法数值被拒绝；停止后默认 0.6 秒清零，浏览器关闭、
+网络中断或页面失去焦点都会停车。网页节点以 20 Hz 刷新 `/cmd_vel`。
 
 SIGINT、SIGTERM、输入断开和可捕获异常退出时会尝试发送零指令并恢复终端。
 SIGKILL、断电、通信中断无法保证发送停车消息，需要 ESP32 固件的命令看门狗兜底。
@@ -247,6 +314,15 @@ ros2 topic hz /cmd_vel
 连接正常但电机不动时，可在原配 ESP32 串口输入 `status` 查看 `ros=connected`
 和 PWM，输入 `version` 检查固件版本。
 
+网页控制另需检查：浏览器打开后状态显示"就绪"，按住方向键时
+`ros2 topic echo /cmd_vel` 出现对应速度，松开后 0.6 秒内回到零。
+命令行自检：
+
+```bash
+curl -s http://127.0.0.1:8080/state
+curl -s -X POST -d "linear=0&angular=0" http://127.0.0.1:8080/cmd
+```
+
 ## 脚本发布、开机更新与守护进程
 
 ### 与 hs411 的对应关系
@@ -263,6 +339,8 @@ systemd 负责开机运行和 daemon 自身崩溃后的重启，并把输出收�
 
 后台只启动 micro-ROS Agent。键盘节点必须连接真实终端，通过 `carctl teleop`
 启动；不把键盘程序放进后台造成反复退出，也不在开机时发布非零运动指令。
+网页控制节点同样不在开机时自动发布指令，需要常驻时用可选的
+`tb6612-car-web.service`，服务启动后同样只发送零指令。
 
 ### 1. 编译一个版本
 
@@ -426,6 +504,7 @@ carctl status                    # 服务状态
 carctl logs                      # 跟踪 daemon/Agent/升级日志
 carctl teleop                    # 当前终端运行键盘控制，无需手动 source
 carctl teleop --ros-args -p key_timeout:=0.8
+carctl web                       # 当前终端运行网页控制，浏览器访问本机 IP
 sudo carctl stop
 sudo carctl start
 sudo carctl restart

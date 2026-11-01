@@ -8,6 +8,13 @@ target_compile_features(test_teleop_control PRIVATE cxx_std_17)
 target_include_directories(test_teleop_control PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../common)
 add_test(NAME teleop_control COMMAND test_teleop_control)
 
+find_package(Threads REQUIRED)
+add_executable(test_http_server test_http_server.cpp)
+target_compile_features(test_http_server PRIVATE cxx_std_17)
+target_include_directories(test_http_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../common)
+target_link_libraries(test_http_server PRIVATE Threads::Threads)
+add_test(NAME http_server COMMAND test_http_server)
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME version_archive
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../../../version/test_update.py)

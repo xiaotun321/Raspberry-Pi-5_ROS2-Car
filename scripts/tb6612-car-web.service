@@ -1,0 +1,19 @@
+[Unit]
+Description=TB6612 ROS 2 car web control
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=/work
+
+[Service]
+Type=simple
+ExecStart=/bin/bash /work/app/daemon/web_teleop.sh
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+KillMode=control-group
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tb6612-car-web
+
+[Install]
+WantedBy=multi-user.target

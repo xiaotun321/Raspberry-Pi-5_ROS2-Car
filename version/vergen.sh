@@ -11,7 +11,7 @@ commit="${4:?}"
 [[ "$arch" == arm64 || "$arch" == amd64 ]] || exit 2
 [[ "$commit" =~ ^[A-Za-z0-9._-]+$ ]] || exit 2
 # 静态核对架构与嵌入版本，允许在 x86 主机打包 ARM 程序。
-for executable in keyboard_teleop car_daemon; do
+for executable in keyboard_teleop car_daemon web_teleop; do
   python3 "$repo/version/verify_binary.py" \
     "$prefix/lib/tb6612_car_ros2/$executable" "$arch" "$version" "$commit"
 done
@@ -23,7 +23,7 @@ app="$root/work/app/daemon"
 mkdir -p "$root/DEBIAN" "$app/ros"
 # 解引用安装目录的链接，发布包不能依赖构建机的源码路径。
 cp -aL "$prefix" "$app/ros/tb6612_car_ros2"
-for script in runtime_env.sh agent.sh boot_apps.sh keyboard_teleop.sh; do
+for script in runtime_env.sh agent.sh boot_apps.sh keyboard_teleop.sh web_teleop.sh; do
   install -m 755 "$repo/scripts/$script" "$app/$script"
 done
 # 版本清单供 carctl version 显示，并由升级器核对产品、架构和版本。

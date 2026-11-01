@@ -9,6 +9,7 @@ car_bin="$CAR_RELEASE_DIR/ros/tb6612_car_ros2/lib/tb6612_car_ros2"
 if [[ "${1:-}" == --check ]]; then
   "$car_bin/car_daemon" --version
   "$car_bin/keyboard_teleop" --version
+  "$car_bin/web_teleop" --version
   agent_prefix="$(ros2 pkg prefix micro_ros_agent)"
   agent_executable="$agent_prefix/lib/micro_ros_agent/micro_ros_agent"
   [[ -x "$agent_executable" ]] || exit 1

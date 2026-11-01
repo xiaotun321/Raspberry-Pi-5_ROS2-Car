@@ -3,7 +3,7 @@
 <package format="3">
   <name>tb6612_car_ros2</name>
   <version>0.0.0</version>
-  <description>C++ keyboard teleop and micro-ROS Agent bringup for an ESP32-S3 TB6612 car.</description>
+  <description>C++ keyboard/web teleop and micro-ROS Agent bringup for an ESP32-S3 TB6612 car.</description>
   <maintainer email="202649427@qq.com">shuaijie</maintainer>
   <license>TODO: License declaration</license>
 

@@ -91,5 +91,31 @@ int main() {
   maximum.handle_key('w', start);
   expect(maximum.current(start + 4999ms), 0.15, 0);
   expect(maximum.current(start + 5s), 0, 0);
+
+  // 网页下发绝对速度：限幅、刷新超时、非法数值拒绝。
+  TeleopControl web(0.6);
+  check(web.set_motion(0.15, 0.0, start));
+  expect(web.current(start + 599ms), 0.15, 0);
+  expect(web.current(start + 600ms), 0, 0);
+
+  check(web.set_motion(0.3, -0.5, start));
+  expect(web.current(start), 0.3, -0.5);
+
+  check(web.set_motion(5.0, 9.0, start));
+  expect(web.current(start), TeleopControl::kMaxLinearSpeed,
+         TeleopControl::kMaxAngularSpeed);
+
+  check(web.set_motion(-5.0, -9.0, start));
+  expect(web.current(start), -TeleopControl::kMaxLinearSpeed,
+         -TeleopControl::kMaxAngularSpeed);
+
+  check(!web.set_motion(std::numeric_limits<double>::quiet_NaN(), 0.0, start));
+  check(!web.set_motion(0.1, std::numeric_limits<double>::infinity(), start));
+  expect(web.current(start), -TeleopControl::kMaxLinearSpeed,
+         -TeleopControl::kMaxAngularSpeed);
+
+  check(web.set_motion(0.0, 0.0, start));
+  expect(web.current(start), 0, 0);
+
   std::cout << "All teleop control checks passed\n";
 }

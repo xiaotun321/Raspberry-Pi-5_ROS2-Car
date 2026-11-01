@@ -47,12 +47,17 @@ ament_target_dependencies(keyboard_teleop PUBLIC rclcpp geometry_msgs)
 find_package(Threads REQUIRED)
 add_executable(car_daemon src/proc_daemon.cpp)
 target_link_libraries(car_daemon PRIVATE common Threads::Threads)
+# 网页控制节点：自带 HTTP 服务器，只依赖 POSIX socket。
+add_executable(web_teleop src/proc_web_teleop.cpp)
+target_link_libraries(web_teleop PRIVATE common Threads::Threads)
+ament_target_dependencies(web_teleop PUBLIC rclcpp geometry_msgs)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(keyboard_teleop PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(car_daemon PRIVATE -Wall -Wextra -Wpedantic)
+  target_compile_options(web_teleop PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-install(TARGETS keyboard_teleop car_daemon DESTINATION lib/${PROJECT_NAME})
+install(TARGETS keyboard_teleop car_daemon web_teleop DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)

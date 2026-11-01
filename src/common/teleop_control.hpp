@@ -18,6 +18,14 @@ class TeleopControl {
   using Clock = std::chrono::steady_clock;
   using TimePoint = Clock::time_point;
 
+  // 指令限幅：键盘调速和网页绝对速度共用同一上限，避免越界指令。
+  static constexpr double kMaxLinearSpeed = 0.50;
+  static constexpr double kMaxAngularSpeed = 2.5;
+  static constexpr double kMinLinearSpeed = 0.02;
+  static constexpr double kMinAngularSpeed = 0.1;
+  static constexpr double kDefaultLinearSpeed = 0.15;
+  static constexpr double kDefaultAngularSpeed = 0.8;
+
   explicit TeleopControl(double key_timeout = 0.6) : timeout_(key_timeout) {
     if (!std::isfinite(key_timeout) || key_timeout <= 0.0 ||
         key_timeout > 5.0) {
@@ -45,16 +53,16 @@ class TeleopControl {
         target_ = {};
         break;
       case 'q':
-        linear_speed_ = std::min(0.50, linear_speed_ + 0.02);
+        linear_speed_ = std::min(kMaxLinearSpeed, linear_speed_ + 0.02);
         return false;
       case 'e':
-        linear_speed_ = std::max(0.02, linear_speed_ - 0.02);
+        linear_speed_ = std::max(kMinLinearSpeed, linear_speed_ - 0.02);
         return false;
       case 'z':
-        angular_speed_ = std::min(2.5, angular_speed_ + 0.1);
+        angular_speed_ = std::min(kMaxAngularSpeed, angular_speed_ + 0.1);
         return false;
       case 'c':
-        angular_speed_ = std::max(0.1, angular_speed_ - 0.1);
+        angular_speed_ = std::max(kMinAngularSpeed, angular_speed_ - 0.1);
         return false;
       default:
         return false;
@@ -71,6 +79,18 @@ class TeleopControl {
     return target_;
   }
 
+  // 网页/遥控直接下发绝对速度：按同一限幅裁剪后生效，并刷新运动超时。
+  // 非有限数值（NaN、Inf）视为无效指令，返回 false 且不改变当前状态。
+  bool set_motion(double linear, double angular, TimePoint now) {
+    if (!std::isfinite(linear) || !std::isfinite(angular)) {
+      return false;
+    }
+    target_ = {std::clamp(linear, -kMaxLinearSpeed, kMaxLinearSpeed),
+               std::clamp(angular, -kMaxAngularSpeed, kMaxAngularSpeed)};
+    last_motion_ = now;
+    return true;
+  }
+
   double linear_speed() const {
     return linear_speed_;
   }
@@ -83,8 +103,8 @@ class TeleopControl {
   std::chrono::duration<double> timeout_;
   TimePoint last_motion_{};
   Motion target_{};
-  double linear_speed_ = 0.15;
-  double angular_speed_ = 0.8;
+  double linear_speed_ = kDefaultLinearSpeed;
+  double angular_speed_ = kDefaultAngularSpeed;
 };
 
 }  // namespace tb6612
