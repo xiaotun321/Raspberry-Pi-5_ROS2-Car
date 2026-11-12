@@ -21,7 +21,7 @@ if [[ "$host_arch" != "$arch" ]]; then
   source "$repo/version/cross.conf"
   if [[ ! -d "$CAR_SYSROOT/opt/ros/jazzy" ]]; then
     echo "Missing ARM64 sysroot: $CAR_SYSROOT" >&2
-    echo "/opt/ros/jazzy alone is not a sysroot. Run version/sync_sysroot.sh USER@BOARD first." >&2
+    echo "/opt/ros/jazzy alone is not a sysroot. Run version/build_sysroot.sh first." >&2
     exit 2
   fi
   CAR_SYSROOT="$(realpath -e "$CAR_SYSROOT")"
@@ -44,9 +44,16 @@ if ! git -C "$repo" diff --quiet 2>/dev/null || \
   commit="$commit-dirty"
 fi
 # 每次使用独立目录，避免把 symlink-install 或旧版本文件打进发布包。
+# 构建树放在 version/tmp 下，target/ 只保留最终的安装产物副本（与产线工程一致）。
+mkdir -p "$repo/version/tmp"
+# 暂存树里带着安装好的 package.xml，colcon 会当成重复包，这里按 target/ 的做法屏蔽。
+touch "$repo/version/tmp/COLCON_IGNORE"
+stage="$(mktemp -d "$repo/version/tmp/build.XXXXXX")"
+# 与产线工程一致：每次构建清空 out/，里面只保留本次产物。
+rm -rf "$repo/version/out"
+mkdir -p "$repo/version/out"
 mkdir -p "$repo/target"
 touch "$repo/target/COLCON_IGNORE"
-stage="$(mktemp -d "$repo/target/release.XXXXXX")"
 cmake_args=(-DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
   "-DCAR_VERSION=$version" "-DCAR_GIT_COMMIT=$commit")
 if [[ "$cross" == true ]]; then
@@ -68,6 +75,17 @@ colcon --log-base "$stage/log" build \
   --packages-select tb6612_car_ros2 \
   --build-base "$stage/build" --install-base "$stage/install" \
   --cmake-args "${cmake_args[@]}"
+# 与产线工程一致：target/ 下留一份已 strip 的安装产物，进程可直接取用。
+package_dir="$repo/target/tb6612_car_ros2"
+rm -rf "$package_dir"
+cp -aL "$stage/install/tb6612_car_ros2" "$package_dir"
+strip_tool="strip"
+if [[ "$cross" == true ]]; then
+  strip_tool="${CAR_CROSS_PREFIX}strip"
+fi
+if command -v "$strip_tool" >/dev/null 2>&1; then
+  find "$package_dir/lib/tb6612_car_ros2" -maxdepth 1 -type f -exec "$strip_tool" {} +
+fi
 # 测试通过后才打包，任何一步失败都会停止后续发布步骤。
 if [[ "$cross" == false ]]; then
   ctest --test-dir "$stage/build/tb6612_car_ros2" --output-on-failure

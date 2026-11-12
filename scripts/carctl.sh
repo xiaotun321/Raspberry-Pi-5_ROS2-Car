@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 安装为 /usr/local/bin/carctl；日常操作不需要手动 source ROS 环境。
-# 用法：carctl status/logs/version/teleop；启停和回退通常需要 sudo。
+# 用法：carctl status/logs/version/teleop/web/bringup；启停和回退通常需要 sudo。
 set -e
 action="${1:-status}"
 shift || true
@@ -27,6 +27,10 @@ case "$action" in
     # 网页控制节点；浏览器访问 http://<本机IP>:8080/ 即可下发指令。
     exec /bin/bash /work/app/daemon/web_teleop.sh "$@"
     ;;
+  bringup)
+    # 前台拉起 Agent 和控制节点，参数原样传给 launch 文件。
+    exec /bin/bash /work/app/daemon/ros_launch.sh "$@"
+    ;;
   rollback)
     # 先停服务再切换版本；拒绝存在待更新包时回退，避免启动后又被升级。
     [[ "$EUID" == 0 ]] || { echo "Use sudo carctl rollback" >&2; exit 1; }
@@ -40,7 +44,7 @@ case "$action" in
     systemctl start tb6612-car.service
     ;;
   *)
-    echo "Usage: carctl {start|stop|restart|status|logs|version|teleop|web|rollback}" >&2
+    echo "Usage: carctl {start|stop|restart|status|logs|version|teleop|web|bringup|rollback}" >&2
     exit 2
     ;;
 esac

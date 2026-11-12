@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 spec = importlib.util.spec_from_file_location(
-    "verify_binary", Path(__file__).with_name("verify_binary.py")
+    "verify_binary", Path(__file__).parent.parent / "tools" / "verify_binary.py"
 )
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)

@@ -1,39 +1,99 @@
+"""一键拉起 Agent、键盘控制和网页控制。
+
+用法：
+
+    # 默认：Agent（UDP）+ 网页控制
+    ros2 launch tb6612_car_ros2 car_bringup.launch.py transport:=udp4 udp_port:=8888
+
+    # 串口 Agent + 键盘控制（键盘节点需要控制终端，网页控制默认关闭）
+    ros2 launch tb6612_car_ros2 car_bringup.launch.py transport:=serial keyboard:=true
+
+    # 网页控制改端口并加令牌
+    ros2 launch tb6612_car_ros2 car_bringup.launch.py web_port:=8081 web_token:=secret
+
+    # Agent 不在本机时只起控制节点
+    ros2 launch tb6612_car_ros2 car_bringup.launch.py agent:=false keyboard:=true
+
+键盘控制和网页控制发布的是同一个 /cmd_vel，同时打开会互相覆盖指令，
+所以默认只开网页控制，需要键盘时用 keyboard:=true 并关掉网页控制。
+"""
+
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
-from launch.substitutions import PythonExpression
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
 
+def _web_node(context):
+    """按需拼出网页控制的参数：令牌为空时不能传 token:=，rcl 会解析失败。"""
+    port = LaunchConfiguration('web_port').perform(context)
+    bind = LaunchConfiguration('web_bind').perform(context)
+    token = LaunchConfiguration('web_token').perform(context)
+    arguments = ['--ros-args', '-p', 'port:=' + port, '-p', 'bind_address:=' + bind]
+    if token:
+        arguments += ['-p', 'token:=' + token]
+    return [Node(
+        package='tb6612_car_ros2',
+        executable='web_teleop',
+        name='tb6612_web_teleop',
+        output='screen',
+        arguments=arguments,
+    )]
+
+
 def generate_launch_description():
+    transport = LaunchConfiguration('transport')
+    agent = LaunchConfiguration('agent')
+    keyboard = LaunchConfiguration('keyboard')
+    web = LaunchConfiguration('web')
+
     return LaunchDescription([
-        # 声明启动参数
+        # 启动参数
         DeclareLaunchArgument(
-            'transport', default_value='udp4',  # 参数名称transport, 不传参时使用默认值udp4 
-            description='micro-ROS Agent transport: udp4 for WiFi, serial for USB'),  # 帮助说明 执行ros2 launch 你的功能包 文件名.launch.py --show-args 可以查看到
+            'agent', default_value='true',
+            description='是否启动 micro-ROS Agent（Agent 不在本机时关掉）'),
+        DeclareLaunchArgument(
+            'transport', default_value='udp4',
+            description='micro-ROS Agent 传输方式：udp4 走 Wi-Fi，serial 走 USB 串口'),
         DeclareLaunchArgument(
             'serial_port', default_value='/dev/ttyACM0',
-            description='ESP32-S3 micro-ROS serial device'),
+            description='ESP32-S3 micro-ROS 串口设备'),
         DeclareLaunchArgument(
             'baudrate', default_value='921600',
-            description='micro-ROS serial baudrate'),
+            description='micro-ROS 串口波特率'),
         DeclareLaunchArgument(
             'udp_port', default_value='8888',
-            description='micro-ROS Agent UDP port for WiFi transport'),
+            description='micro-ROS Agent 的 UDP 端口'),
+        DeclareLaunchArgument(
+            'keyboard', default_value='false',
+            description='是否启动键盘控制（需要控制终端）'),
+        DeclareLaunchArgument(
+            'key_timeout', default_value='0.6',
+            description='最后一次方向按键后自动停车的秒数'),
+        DeclareLaunchArgument(
+            'web', default_value='true',
+            description='是否启动网页控制'),
+        DeclareLaunchArgument(
+            'web_port', default_value='8080',
+            description='网页控制监听端口'),
+        DeclareLaunchArgument(
+            'web_bind', default_value='0.0.0.0',
+            description='网页控制监听地址'),
+        DeclareLaunchArgument(
+            'web_token', default_value='',
+            description='网页控制令牌，非空时命令需要携带 ?token='),
+
+        # Agent：串口和 UDP 两种方式，按 transport 二选一启动。
         Node(
-            package='micro_ros_agent',          # 功能包名
-            executable='micro_ros_agent',       # 可执行程序名
-            name='micro_ros_agent',             # 节点名称
-            output='screen',                    # 打印日志到终端
-            condition=IfCondition(PythonExpression([   # 条件启动，只有当 transport 参数等于字符串 serial 时，才启动这个节点。
-                "'", LaunchConfiguration('transport'), "' == 'serial'"  # 此时 LaunchConfiguration('transport') 替换成 serial,最终Python表达式等价为 'serial' == 'serial' 结果为 True
-            ])),
-            arguments=[                                # 命令行启动参数，传递给 micro_ros_agent 可执行程序的命令行参数。
-                'serial',
-                '--dev', LaunchConfiguration('serial_port'),
-                '--baudrate', LaunchConfiguration('baudrate'),
-            ],
+            package='micro_ros_agent',
+            executable='micro_ros_agent',
+            name='micro_ros_agent',
+            output='screen',
+            condition=IfCondition(PythonExpression([
+                "'", agent, "' == 'true' and '", transport, "' == 'serial'"])),
+            arguments=['serial', '--dev', LaunchConfiguration('serial_port'),
+                       '--baudrate', LaunchConfiguration('baudrate')],
         ),
         Node(
             package='micro_ros_agent',
@@ -41,28 +101,21 @@ def generate_launch_description():
             name='micro_ros_agent',
             output='screen',
             condition=IfCondition(PythonExpression([
-                "'", LaunchConfiguration('transport'), "' == 'udp4'"
-            ])),
-            arguments=[
-                'udp4',
-                '--port', LaunchConfiguration('udp_port'),
-            ],
+                "'", agent, "' == 'true' and '", transport, "' == 'udp4'"])),
+            arguments=['udp4', '--port', LaunchConfiguration('udp_port')],
         ),
+
+        # 键盘控制：从控制终端读按键，需要 ros2 launch 在终端里执行。
+        Node(
+            package='tb6612_car_ros2',
+            executable='keyboard_teleop',
+            name='tb6612_keyboard_teleop',
+            output='screen',
+            condition=IfCondition(keyboard),
+            arguments=['--ros-args', '-p',
+                       ['key_timeout:=', LaunchConfiguration('key_timeout')]],
+        ),
+
+        # 网页控制：浏览器访问 http://<本机IP>:<端口>/ 即可下发指令。
+        OpaqueFunction(function=_web_node, condition=IfCondition(web)),
     ])
-
-'''
-arguments 等价于终端直接敲命令：
-# 串口模式
-ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyACM0 --baudrate 921600
-
-
-# UDP wifi模式
-ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
-'''
-
-
-
-'''
-ros2 launch your_package xxx.launch.py transport:=serial
-ros2 launch tb6612_car_ros2 car_bringup.launch.py transport:=udp4 udp_port:=8888
-'''

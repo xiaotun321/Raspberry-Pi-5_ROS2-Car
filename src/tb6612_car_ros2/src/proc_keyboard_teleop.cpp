@@ -1,5 +1,6 @@
 #include <csignal>
 #include <cstdio>
+#include <unistd.h>
 #include <cstring>
 #include <geometry_msgs/msg/twist.hpp>
 #include <memory>
@@ -32,8 +33,15 @@ class KeyboardTeleop : public rclcpp::Node {
     if (control_.handle_key(key, now)) {
       publish(control_.current(now));
     }
-    std::printf("\r线速度指令=%.2f  角速度指令=%.2f   ",
-                control_.linear_speed(), control_.angular_speed());
+    // 交互终端用回车原地刷新；stdout 被 ros2 launch 捕获成管道时补换行，
+    // 否则没有结尾换行的状态行会一直卡在 launch 的输出缓冲区里。
+    if (isatty(STDOUT_FILENO)) {
+      std::printf("\r线速度指令=%.2f  角速度指令=%.2f   ",
+                  control_.linear_speed(), control_.angular_speed());
+    } else {
+      std::printf("线速度指令=%.2f  角速度指令=%.2f\n",
+                  control_.linear_speed(), control_.angular_speed());
+    }
     std::fflush(stdout);
   }
 

@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # 原子投递升级包；默认只上传，显式 --reboot 才重启开发板。
-# 用法：bash scripts/deploy.sh 本地版本.ver 用户名@开发板IP [--reboot]
+# 用法：bash scripts/deploy.sh 本地版本包 用户名@开发板IP [--reboot]
+# 版本包可以是未加头的 .bin、带头信息的 .bivi，或旧格式的 .ver。
 # 前提：开发板已完成 bootstrap，远端用户可使用 sudo。
 set -e
-package="${1:?Usage: deploy.sh FILE.ver USER@BOARD [--reboot]}"
+package="${1:?Usage: deploy.sh FILE USER@BOARD [--reboot]}"
 board="${2:?}"
 action="${3:-}"
 [[ $# -le 3 && ( -z "$action" || "$action" == --reboot ) ]] || exit 2
-[[ -f "$package" && "$package" == *.ver ]] || exit 2
+[[ -f "$package" && ( "$package" == *.bin || "$package" == *.bivi || "$package" == *.ver ) ]] || exit 2
 # 限定 SSH 目标格式，避免把参数误解释为选项或远端命令。
 [[ "$board" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || exit 2
 # 先传到普通用户可写的临时文件，避免更新器读取尚未传完的包。

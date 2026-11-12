@@ -26,6 +26,7 @@ if systemctl is-active --quiet tb6612-car.service; then
   exit 1
 fi
 install -m 755 "$repo/version/update.py" /work/car-bootstrap/update.py
+install -m 755 "$repo/version/ver_header.py" /work/car-bootstrap/ver_header.py
 install -m 755 "$repo/scripts/vinstall.sh" /work/car-bootstrap/vinstall.sh
 install -m 755 "$repo/scripts/vmonitor.sh" /work/car-bootstrap/vmonitor.sh
 install -m 755 "$repo/scripts/carctl.sh" /usr/local/bin/carctl

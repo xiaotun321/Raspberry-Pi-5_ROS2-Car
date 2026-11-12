@@ -4,6 +4,14 @@
 和 micro-ROS Jazzy。通过 `/cmd_vel`（`geometry_msgs/msg/Twist`）发送指令，
 默认使用 Wi-Fi UDP 8888。键盘和网页控制节点使用 C++17 / rclcpp。
 
+提交信息格式为 `<类型>#<任务号>: <说明>`，由 `.githooks/commit-msg` 强制检查：
+
+```text
+feat  新增功能        fix   修复问题        docs  文档修改
+refactor 重构         test  测试相关        perf  性能优化
+build 构建配置        ci   CI 配置         chore 其他维护
+```
+
 ## 代码组织
 
 参考 hs411 的公共头文件、独立进程入口、ament_cmake 包及运行脚本组织方式：
@@ -22,28 +30,97 @@ src/
     ├── src/proc_keyboard_teleop.cpp
     ├── src/proc_web_teleop.cpp
     ├── src/proc_daemon.cpp
-    ├── launch/car_bringup.launch.py
+    ├── launch/car_bringup.launch.py   # 一键拉起 Agent、键盘和网页控制
     └── test/                    # 控制逻辑、HTTP 服务器与守护进程测试
 scripts/
-├── ros_env.sh
-├── ros_launch.sh
-├── keyboard_teleop.sh
-├── web_teleop.sh
+├── runtime_env.sh               # 发布目录环境（配置、ROS、Agent）
+├── agent.sh                     # 启动 micro-ROS Agent
+├── ros_launch.sh                # 跑 launch 文件，一键拉起整套进程
+├── keyboard_teleop.sh           # 交互终端键盘控制
+├── web_teleop.sh                # 网页控制节点
 ├── bootstrap.sh                 # 首次安装更新器和 systemd 服务
 ├── boot_apps.sh                 # 发布目录应用入口
 ├── carctl.sh                    # 日常启停、版本、日志和遥控命令
-└── deploy.sh                    # 上传版本并按需重启
+├── deploy.sh                    # 上传版本并按需重启
+└── vmonitor.sh, vinstall.sh     # 开机自检与版本安装入口
 version/
-├── autogen.sh                   # 带版本编译和测试
-├── vergen.sh                    # 生成 .ver 和首次安装包
-├── update.py                    # 启动前校验和版本切换
-└── test_update.py               # 更新器回归测试
+├── autogen.sh                   # 带版本编译和测试的入口
+├── vergen.sh                    # 打包：deb + 校验文件 + .bin + .bivi
+├── update.py                    # 板端更新器：校验归档、切换版本
+├── ver_header.py                # 版本包头部格式（更新器与加头工具共用）
+├── build_sysroot.sh             # 不联开发板生成 ARM64 sysroot
+├── check_cross.sh               # 交叉编译预检：真链接一个 ARM64 程序
+├── link_cross_tools.sh          # 补齐未版本化的交叉工具入口
+├── cross.conf                   # 交叉编译的路径配置
+├── tools/                       # 只在构建机运行的工具，不上板
+│   ├── make_ver_header.py       # 加头/校验头部的命令行工具
+│   ├── verify_binary.py         # 打包前核对二进制架构与嵌入版本
+│   └── relativize_sysroot.py    # 把 sysroot 里的绝对符号链接改成相对链接
+└── test/                        # 离线回归测试，不参与发布
+    ├── test_update.py           # 更新器：归档校验与版本切换
+    └── test_binary.py           # 打包检查：架构与版本错误
 ```
 
+目录分工与产线工程（huida_vision）一致：`version/` 顶层只放构建入口脚本和
+板端运行时文件，专用的 Python 工具收进自包含子目录，每个子目录自带说明。
+
+- `update.py` 和 `ver_header.py` 随 `bootstrap.sh` 装到板子的
+  `/work/car-bootstrap`，是板端运行时的一部分：更新器负责认领 `1.ver`、
+  校验归档、切换当前版本，头部格式定义被它直接引用。
+- `tools/` 只在构建机上运行，由 `vergen.sh` 和 `build_sysroot.sh` 调用，
+  详见 [version/tools/README.md](version/tools/README.md)。
+- `test/` 是纯离线回归测试，不写 `/work`、不碰真实服务，可单独执行：
+
+```bash
+python3 -m pytest version/test -q
+```
+
+它们同时被 CTest 收录，构建时随其他测试一起跑。
+
+构建流程与产物布局对齐产线工程（huida_vision）：
+
+```text
+target/                              # 与产线工程的 target/oam 对应
+├── COLCON_IGNORE
+└── tb6612_car_ros2/                # 安装产物副本，进程已 strip
+    ├── lib/tb6612_car_ros2/{car_daemon,keyboard_teleop,web_teleop}
+    └── share/{ament_index,colcon-core,tb6612_car_ros2}
+version/
+├── tmp/build.*/                    # 本次构建树（编译、测试、安装目录）
+├── tmp/tb6612-car/                 # 打包暂存树，与 version/tmp/SpiderHunter 对应
+│   ├── root/DEBIAN/control
+│   ├── root/work/app/daemon/...
+│   └── tb6612-car_<版本>_<架构>.deb{,.md5,.sha256}
+├── out/tb6612-car_<版本>_<架构>.bin    # 版本包载荷
+└── tb6612-car_<版本>_<架构>.bivi       # 同一载荷加 1024 字节头部
+```
+
+各步骤与产线工程的对应关系：
+
+| 产线工程（huida_vision） | 本项目 |
+| --- | --- |
+| `version/autogen.sh` 编译、装包、切版本 | 同名脚本，另加交叉编译与主机侧测试 |
+| 清空 `out/` 后再打包 | 同样在每次构建开始时清空 `version/out/` |
+| `cp -rf ./install/oam ./target/` + `$STRIP` | `cp -aL` 到 `target/tb6612_car_ros2/` 后用交叉工具链 strip |
+| `version/tmp/SpiderHunter` 打包暂存树 | `version/tmp/tb6612-car` |
+| `mkworkfs.sh` 建 `/work/app` 目录骨架 | 由板端更新器在安装时创建同样的目录 |
+| `i403_<版本>.bin`（tar.bz2 + deb + md5） | `tb6612-car_<版本>_<架构>.bin`，校验文件多一份 sha256 |
+| `bivi_<版本>.bivi`（`tools_ver_maker` 加头） | `tb6612-car_<版本>_<架构>.bivi`，用 `version/tools/make_ver_header.py` 加同样的 1024 字节头 |
+| `version/bivi_*.bivi` | `version/tb6612-car_*.bivi` |
+
+两处刻意保留的差异：产线工程的 `.bin` 末尾追加一行 `$<版本号>` 供离线工具识别，
+本项目不追加，因为更新器会严格校验归档内容（只允许 deb 与校验文件），版本号已在
+`version.json` 和 `.bivi` 头部里；产线工程用 `rm -r ../build ../install ../log`
+清空工作区后编译，本项目把编译、测试和安装目录都放在 `version/tmp/build.*`，
+不动仓库根目录的开发工作区。
+
 `common` 为 CMake INTERFACE 目标，进程编译为 `keyboard_teleop`、`web_teleop`
-和 `car_daemon`，安装至 `lib/tb6612_car_ros2`，保持原有运行命令。launch Python
-文件只负责启动 Agent，业务节点已改为 C++。工作区由 colcon 发现包，无需根目录
-CMakeLists.txt。
+和 `car_daemon`，安装至 `lib/tb6612_car_ros2`。工作区由 colcon 发现包，无需
+根目录 CMakeLists.txt。
+
+启动方式有两条：常驻服务走 `scripts/boot_apps.sh`（daemon 守护 Agent，异常自动
+重启）；要手动把整套进程拉起来（前台、可交互）走 `scripts/ros_launch.sh`，它调用
+`launch/car_bringup.launch.py`，由 launch 统一编排 Agent、键盘控制和网页控制。
 
 ## 构建
 
@@ -59,7 +136,8 @@ CMakeLists.txt。
 cd Raspberry-Pi-5_ROS2-Car
 source /opt/ros/jazzy/setup.bash
 rosdep install --from-paths src --ignore-src --skip-keys micro_ros_agent -y
-colcon build --packages-select tb6612_car_ros2 --symlink-install && source scripts/ros_env.sh
+colcon build --packages-select tb6612_car_ros2
+source install/setup.bash
 ```
 
 保留整个仓库的 `src/common` 和功能包目录。由旧 Python 包升级时，请先清理
@@ -73,12 +151,11 @@ colcon build --packages-select tb6612_car_ros2 --symlink-install && source scrip
 如果此前已在其他工作区安装，需要先 source 那个工作区的 `install/setup.bash`。
 `rosdep --skip-keys` 只跳过依赖解析，不会安装 Agent。
 
-`scripts/ros_env.sh` 会自动加载 Agent 工作区：优先使用 `MICRO_ROS_AGENT_SETUP`
-指定的路径，未指定时依次查找 `~/microros_ws/install/setup.bash` 和
-`/opt/microros_ws/install/setup.bash`（对应官方 micro_ros_setup 教程和
-`scripts/install_agent.sh` 的安装位置）。因此 `scripts/ros_launch.sh`、
-`scripts/keyboard_teleop.sh` 和 `scripts/web_teleop.sh` 在全新终端里也能直接
-找到 `micro_ros_agent`，不必手动 source Agent 工作区。
+发布包里由 `scripts/runtime_env.sh` 加载 Agent 工作区：优先使用配置项
+`MICRO_ROS_AGENT_SETUP` 指定的路径，未指定时使用 `/opt/ros/jazzy` 中已安装的
+Agent（`scripts/install_agent.sh` 的安装位置）。因此板子上的
+`scripts/agent.sh`、`scripts/keyboard_teleop.sh` 和 `scripts/web_teleop.sh`
+在全新终端里也能直接找到 `micro_ros_agent`。
 
 尚未安装时，参考 [micro_ros_setup 官方 Jazzy 说明](https://github.com/micro-ROS/micro_ros_setup/tree/jazzy#building-micro-ros-agent)，
 在独立工作区构建（以下目录用于首次安装）：
@@ -96,14 +173,16 @@ ros2 run micro_ros_setup build_agent.sh && source install/local_setup.bash
 ros2 pkg prefix micro_ros_agent
 ```
 
-每一步成功后再执行下一步。启动 Agent 的新终端加载两个工作区：
+每一步成功后再执行下一步。开发时启动 Agent 与键盘控制的两个终端：
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-source ~/microros_ws/install/setup.bash
-cd ~/Projects/Raspberry-Pi-5_ROS2-Car
-source install/local_setup.bash
-bash scripts/ros_launch.sh transport:=udp4 udp_port:=8888
+# 终端 1：Agent
+source /opt/ros/jazzy/setup.bash && source ~/microros_ws/install/setup.bash
+ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
+
+# 终端 2：键盘控制
+cd Raspberry-Pi-5_ROS2-Car && source install/setup.bash
+ros2 run tb6612_car_ros2 keyboard_teleop
 ```
 
 ### 构建错误排查
@@ -128,7 +207,7 @@ Jazzy 的 `ament_target_dependencies` 需要显式 `PUBLIC` 才会在内部链�
 清掉 CMake 缓存重新配置即可：
 
 ```bash
-colcon build --packages-select tb6612_car_ros2 --symlink-install --cmake-clean-cache
+colcon build --packages-select tb6612_car_ros2 --cmake-clean-cache
 ```
 
 彻底一点就删除 `build/tb6612_car_ros2` 和 `install/tb6612_car_ros2` 后重建，
@@ -143,7 +222,6 @@ ros2 pkg prefix tb6612_car_ros2
 ros2 run tb6612_car_ros2 keyboard_teleop
 ```
 
-`scripts/ros_env.sh` 也支持这种回退，以及 merged install 的包内脚本。
 单包回退不负责加载 micro-ROS Agent 所在的其他工作区。
 
 顶层脚本缺失可能是 colcon Bash 扩展未安装、未加载或混用了不同安装来源。
@@ -153,7 +231,7 @@ Ubuntu apt 安装方式可先补齐官方推荐的常用扩展，再用系统 co
 sudo apt update
 sudo apt install python3-colcon-common-extensions python3-colcon-bash
 source /opt/ros/jazzy/setup.bash
-/usr/bin/colcon build --packages-select tb6612_car_ros2 --symlink-install
+/usr/bin/colcon build --packages-select tb6612_car_ros2
 ls -l install/setup.bash install/local_setup.bash
 ```
 
@@ -163,34 +241,53 @@ ls -l install/setup.bash install/local_setup.bash
 
 ## 运行
 
-终端 1 启动 Agent：
+开发板上由 systemd 拉起 `car_daemon`，它再守护 micro-ROS Agent；服务随开机
+自启，升级重启后自动运行新版本。日常操作用 `carctl`：
 
 ```bash
-bash scripts/ros_launch.sh transport:=udp4 udp_port:=8888
+carctl status                 # 服务状态
+carctl version                # 当前版本
+carctl logs                   # 跟踪 daemon/Agent 日志
+carctl teleop                 # 键盘控制（需要交互式终端）
+carctl web                    # 网页控制节点
 ```
 
-终端 2 启动键盘控制（需要交互式终端）：
+键盘控制需要终端按键，网页控制不需要终端：
 
 ```bash
-bash scripts/keyboard_teleop.sh
+carctl teleop
 # 可选：方向按键超时时间，合法范围 0 < key_timeout <= 5 秒
-bash scripts/keyboard_teleop.sh --ros-args -p key_timeout:=0.8
+carctl teleop --ros-args -p key_timeout:=0.8
 ```
 
-脚本默认 ROS_DISTRO=jazzy、ROS_DOMAIN_ID=0，保留已设置的值。也可直接运行：
+### 一键拉起整套进程
+
+`carctl bringup` 在前台启动 launch 文件，由它统一编排 Agent、键盘控制和网页控制：
 
 ```bash
-source scripts/ros_env.sh
-ros2 launch tb6612_car_ros2 car_bringup.launch.py transport:=udp4 udp_port:=8888
-# 在另一个加载相同环境的终端执行
+carctl bringup                                  # Agent(UDP) + 网页控制
+carctl bringup transport:=serial                # 串口 Agent
+carctl bringup keyboard:=true web:=false        # 键盘控制（需要控制终端）
+carctl bringup web_port:=8081 web_token:=secret # 网页控制改端口并加令牌
+```
+
+参数与 launch 文件一致，完整说明见 `ros2 launch tb6612_car_ros2
+car_bringup.launch.py --show-args`。键盘控制和网页控制发布同一个 `/cmd_vel`，
+同时打开会互相覆盖指令，默认只开网页控制。
+
+键盘节点从 `/dev/tty` 读取按键，因此在 `ros2 launch` 下也能用；没有控制终端时
+（比如 systemd 服务里）会直接退出并提示需要交互式终端。
+
+`scripts/keyboard_teleop.sh` 和 `scripts/web_teleop.sh` 只用于发布目录；源码
+工作区里直接运行节点即可：
+
+```bash
+source /opt/ros/jazzy/setup.bash && source install/setup.bash
 ros2 run tb6612_car_ros2 keyboard_teleop
 ```
 
-串口启动配置仍保留，但只有 ESP32 固件启用了串口 micro-ROS 传输才能使用：
-
-```bash
-bash scripts/ros_launch.sh transport:=serial serial_port:=/dev/ttyACM0 baudrate:=921600
-```
+串口传输仍保留，但只有 ESP32 固件启用了串口 micro-ROS 传输才能使用；传输方式
+由 `/work/app/cfg/car.conf` 的 `TRANSPORT` 决定（`udp4` 或 `serial`）。
 
 ESP32 的 `MICRO_ROS_AGENT_IP` 应配置为树莓派在同一局域网的地址，使用
 `hostname -I` 查看；端口和 ROS_DOMAIN_ID 也必须与两端配置一致。
@@ -200,10 +297,10 @@ ESP32 的 `MICRO_ROS_AGENT_IP` 应配置为树莓派在同一局域网的地址�
 网页控制节点提供 HTTP 接口，浏览器访问树莓派 IP 即可代替键盘操作小车：
 
 ```bash
-bash scripts/web_teleop.sh
+carctl web
 # 浏览器打开 http://<树莓派 IP>:8080/
 # 可选：改端口、监听地址或令牌
-bash scripts/web_teleop.sh --ros-args -p port:=8081 -p bind_address:=0.0.0.0
+carctl web --ros-args -p port:=8081 -p bind_address:=0.0.0.0
 ```
 
 页面内嵌在可执行文件中，不依赖外部静态资源，断网的局域网也能直接打开。
@@ -353,9 +450,28 @@ bash version/autogen.sh 1.0.0
 脚本自动加载 ROS 环境，编译 Release，运行 CTest，并生成：
 
 ```text
-version/out/tb6612-car_1.0.0_arm64.ver
-version/out/tb6612-car-bootstrap.tar.gz
+version/out/tb6612-car_1.0.0_arm64.bin      # 版本包载荷（tar.bz2：deb + md5 + sha256）
+version/tb6612-car_1.0.0_arm64.bivi         # 同一载荷加 1024 字节头部
+version/out/tb6612-car-bootstrap.tar.gz     # 开发板首次初始化用的小包
+target/tb6612_car_ros2/                     # 已 strip 的安装产物副本
 ```
+
+`.bin` 和 `.bivi` 内容完全一致，只是后者前面加了 1024 字节头部，格式与产线
+`tools_ver_maker` 相同：
+
+```text
+0x00 uint32 magic         大端 0xDEAD5409
+0x04 char   version[32]   NUL 结尾
+0x24 char   buildtime[20] "YYYY/MM/DD HH:MM:SS"
+0x38 char   reserved[12]
+0x44 uint32 size          大端，载荷字节数
+0x48 uint32 crc32         大端，zlib.crc32(载荷)
+0x4C uint32 type          小端，1
+0x50 零填充至 1024
+```
+
+两种格式都能直接投递给开发板，更新器识别头部并核对长度与 CRC32 后再安装。
+校验头部用 `python3 version/tools/make_ver_header.py --verify 版本包`。
 
 x86_64 Linux 主机原生生成 amd64 包用于本机测试时，显式指定架构：
 
@@ -368,43 +484,53 @@ amd64 包不能用于树莓派。在 x86_64 主机上选择默认 arm64 时，�
 `bzip2`、`python3`、`tar`。每次使用新的版本号；`version.json` 同时记录 Git 提交、
 源码是否有未提交修改、构建时间和架构。程序支持 `--version`。
 
-每次构建使用独立 `target/` 子目录，禁止发布目录中的符号链接依赖源码目录。
-这些目录会保留以便排查构建问题，可在确认不需要后自行清理。
+每次构建使用独立 `version/tmp/build.*` 子目录，禁止发布目录中的符号链接依赖源码
+目录。这些目录会保留以便排查构建问题，可在确认不需要后自行清理。
+`target/tb6612_car_ros2/` 是本次构建的安装产物副本，进程已 strip，可直接取用。
 
 #### x86_64 主机交叉编译 ARM64
 
-`version/cross.conf` 默认配置你使用的 Arm GNU 10.3 工具链：
+交叉编译需要两样东西：能生成 ARM64 代码的编译器，和目标端的 sysroot。
+
+编译器默认用 Ubuntu 官方交叉工具链：
 
 ```bash
-CAR_TOOLCHAIN_ROOT="$HOME/gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu"
-CAR_CROSS_PREFIX="$CAR_TOOLCHAIN_ROOT/bin/aarch64-none-linux-gnu-"
+sudo apt install gcc-13-aarch64-linux-gnu g++-13-aarch64-linux-gnu
+```
+
+该命令只提供带版本号的入口（`aarch64-linux-gnu-gcc-13`），而构建脚本按
+`aarch64-linux-gnu-` 前缀查找工具，两种补齐方式任选其一：
+
+```bash
+sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu   # 元包，自带未版本化入口
+bash version/link_cross_tools.sh                                # 或在用户目录建软链接
+```
+
+`version/cross.conf` 记录上述前缀和 sysroot 位置，也可直接改写或用同名环境变量
+覆盖：
+
+```bash
+CAR_CROSS_PREFIX="/usr/bin/aarch64-linux-gnu-"
 CAR_SYSROOT="$HOME/rpi5-sysroot"
 ```
 
+改用 Arm GNU 官方工具链时填 `CAR_TOOLCHAIN_ROOT` 并让 `CAR_CROSS_PREFIX` 指向
+其中的 `bin/aarch64-none-linux-gnu-`。
+
 **主机的 `/opt/ros/jazzy` 不是 ARM64 sysroot。** 它提供主机运行的构建工具；
-目标头文件和库必须来自开发板。sysroot 是开发板文件系统的本地副本，应至少包含：
+目标头文件和库必须来自开发板或等价的 ARM64 发行版。sysroot 应至少包含：
 
 ```text
 rpi5-sysroot/
 ├── opt/ros/jazzy/               # ARM64 ROS 库、头文件、CMake 配置
-├── usr/include/                # 开发板系统头文件
+├── usr/include/                # 目标系统头文件
 ├── usr/lib/aarch64-linux-gnu/   # glibc 等目标系统库
 ├── usr/lib/gcc/aarch64-linux-gnu/ # 目标 libstdc++.so 开发链接
 └── lib/                        # 系统库/加载器，可能链接到 usr/lib
 ```
 
-主机与开发板均需安装 rsync。开发板需要 Jazzy、rclcpp、geometry_msgs 和 g++
-开发文件，不能只复制一个缺少头文件的运行环境。首次在主机仓库根目录同步：
-
-```bash
-sudo apt install rsync
-bash version/sync_sysroot.sh shuaijie@开发板IP
-```
-
-脚本只读取开发板，复制 `/usr`、`/opt/ros/jazzy` 和系统库；它将副本中的绝对
-符号链接转换成相对链接，防止误指向主机库。目标目录已存在时拒绝覆盖；更新副本
-可指定新目录，然后修改 `cross.conf` 的 `CAR_SYSROOT`。整个 `/usr` 可能较大，
-需预留空间并等待同步完成。也可通过环境变量指定已准备好的完整 sysroot：
+开发板需要 Jazzy、rclcpp、geometry_msgs 和 g++ 开发文件，sysroot 必须带上这些
+头文件，不能只有一个缺头文件的运行环境。在主机仓库根目录生成：
 
 ```bash
 CAR_SYSROOT=/home/shuaijie/board-sysroot bash version/autogen.sh 1.0.0.0t
@@ -424,16 +550,23 @@ bash autogen.sh 1.0.0.0t
 3. 使用 `cmake/toolchain_aarch64.cmake` 编译 ARM64 应用，不运行 ARM 程序。
 4. 打包前读取 ELF 头与嵌入的版本/提交标记，避免把 x86 程序或旧版本装入 ARM 包。
 
-主机测试不能替代开发板测试。GCC 10.3 与开发板较新的 glibc/libstdc++ 或 ROS
-头文件未必兼容；若预检查失败，查看输出及 `target/release.*/probe/link.log`。
-应修正 sysroot 或使用与开发板匹配的工具链，不要跳过链接错误。若主机安装了
-Ubuntu 的 AArch64 交叉编译器，可显式切换，例如：
+主机测试不能替代开发板测试。交叉编译器比开发板的 glibc/libstdc++ 或 ROS
+头文件旧时可能链接失败；若预检查失败，查看输出及 `version/tmp/build.*/probe/link.log`。
+应修正 sysroot 或使用与开发板匹配的工具链，不要跳过链接错误。
+
+
+
+#### 生成 sysroot
+
+`version/build_sysroot.sh` 从 Ubuntu ports 与 ROS 官方源下载 arm64 包，拼出与
+开发板同构的目录结构，开发板不用联网：
 
 ```bash
-CAR_CROSS_PREFIX=/usr/bin/aarch64-linux-gnu- bash version/autogen.sh 1.0.0.0t
+bash version/build_sysroot.sh noble          # 默认写入 $HOME/rpi5-sysroot
 ```
 
-该方式仍然需要开发板 sysroot；不会复用主机的 x86 ROS 库。
+该脚本只读写用户目录，不需要 root；发行版必须与开发板一致（`noble` 或 `jammy`）。
+生成后照常执行 `bash version/autogen.sh 1.0.0.0t` 交叉编译。
 
 ### 2. 首次初始化开发板（仅一次）
 
@@ -455,19 +588,24 @@ sudo bash scripts/bootstrap.sh /opt/microros_ws/install/local_setup.bash
 如果已有 Agent，跳过安装步骤，将 bootstrap 参数换成已有工作区的环境脚本。
 若 Agent 本身已在 `/opt/ros/jazzy` 中，bootstrap 不需要参数。
 配置保存到 `/work/app/cfg/car.conf`，包含传输方式、端口、ROS_DOMAIN_ID 和
-Agent 环境脚本路径；后续 `.ver` 更新不会覆盖配置。
+Agent 环境脚本路径；后续版本包更新不会覆盖配置。
 
 初始化仅启用开机服务，不会立即启动尚未安装的应用。它也不会覆盖 `/work/vinstall.sh`
 等其他项目入口。更新器固定安装在 `/work/car-bootstrap`，普通版本包不升级更新器本身。
-ROS、Agent 和系统共享库不包含在 `.ver` 中；它们是开发板一次性安装的运行环境。
+ROS、Agent 和系统共享库不包含在版本包里；它们是开发板一次性安装的运行环境。
+
+带 1024 字节头信息的 `.bivi` 需要较新的更新器（`version/update.py` 与
+`version/ver_header.py`），重新执行一次 `bootstrap.sh` 即可更新。
 
 ### 3. 上传并重启更新
 
 从构建机使用脚本上传（替换用户名和开发板地址）：
 
 ```bash
-bash scripts/deploy.sh version/out/tb6612-car_1.0.0_arm64.ver shuaijie@192.168.0.106 --reboot
+bash scripts/deploy.sh version/out/tb6612-car_1.0.0_arm64.bin shuaijie@192.168.0.106 --reboot
 ```
+
+`.bivi` 同样可以直接上传。
 
 上传使用 SSH/SCP，远端用户需要 sudo 权限。脚本先复制到临时文件，再通过 sudo
 安装为 `/work/app/tmp/ver/1.ver.partial`，完整落盘后原子重命名为 `1.ver`。
@@ -477,7 +615,7 @@ SSH 在重启时提示连接关闭属于正常现象，应在开发板恢复后�
 也可以在开发板本地投递版本包：
 
 ```bash
-sudo install -m 600 tb6612-car_1.0.0_arm64.ver /work/app/tmp/ver/1.ver.partial
+sudo install -m 600 tb6612-car_1.0.0_arm64.bin /work/app/tmp/ver/1.ver.partial
 sudo sync
 sudo mv /work/app/tmp/ver/1.ver.partial /work/app/tmp/ver/1.ver
 sudo sync

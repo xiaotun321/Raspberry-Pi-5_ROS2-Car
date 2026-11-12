@@ -13,7 +13,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-spec = importlib.util.spec_from_file_location("car_update", Path(__file__).with_name("update.py"))
+spec = importlib.util.spec_from_file_location(
+    "car_update", Path(__file__).parent.parent / "update.py"
+)
 updater = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(updater)
 
@@ -98,6 +100,38 @@ class ArchiveTests(unittest.TestCase):
         destination.mkdir()
         with self.assertRaises(ValueError):
             updater.unpack_wrapper(self.make_wrapper(extra=True), destination)
+
+    def make_headered(self, wrapper, corrupt=False):
+        payload = wrapper.read_bytes()
+        header = bytearray(updater.ver_header.build("1.0.0", payload))
+        if corrupt:
+            header[updater.ver_header.OFFSET_CRC32] ^= 0xFF
+        package = self.root / "test.bivi"
+        package.write_bytes(bytes(header) + payload)
+        return package
+
+    def test_headered_package(self):
+        destination = self.root / "wrapper"
+        destination.mkdir()
+        package = self.make_headered(self.make_wrapper())
+        deb = updater.unpack_wrapper(package, destination)
+        self.assertEqual(deb.read_bytes(), b"deb-payload")
+
+    def test_header_checksum_mismatch(self):
+        destination = self.root / "wrapper"
+        destination.mkdir()
+        package = self.make_headered(self.make_wrapper(), corrupt=True)
+        with self.assertRaises(ValueError):
+            updater.unpack_wrapper(package, destination)
+
+    def test_header_roundtrip(self):
+        payload = b"payload-bytes"
+        header = updater.ver_header.build("1.0.0.0t", payload)
+        self.assertEqual(len(header), updater.ver_header.HEADER_SIZE)
+        info = updater.ver_header.parse(header)
+        self.assertEqual(info["version"], "1.0.0.0t")
+        self.assertEqual(info["size"], len(payload))
+        self.assertIsNone(updater.ver_header.parse(b"not-a-header" * 200))
 
     def test_manifest(self):
         good = dict(product="tb6612-car", format=1, architecture="arm64",

@@ -18,6 +18,10 @@ import tarfile
 import tempfile
 import time
 
+# 更新器与构建脚本共用同一份头部格式定义；本目录可能是 /work/car-bootstrap。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ver_header  # noqa: E402  需要先补上本目录到搜索路径
+
 PRODUCT = "tb6612-car"
 VERSION_RE = r"[0-9]+\.[0-9]+\.[0-9]+([.+~][A-Za-z0-9.]+)?"
 PAYLOAD = "work/app/daemon"
@@ -71,9 +75,16 @@ def extract_members(archive, destination, payload=False):
 
 
 def unpack_wrapper(package, directory):
-    """解开 .ver 外层，确认仅含一个 deb 及其两种校验文件。"""
-    with tarfile.open(package, "r:bz2") as archive:
-        extract_members(archive, directory)
+    """解开版本包外层，确认仅含一个 deb 及其两种校验文件。
+
+    兼容两种投递格式：未加头的 .bin 直接是 tar.bz2；带 1024 字节头信息的
+    .bivi 先剥离头部，并核对头部记录的长度与 CRC32。
+    """
+    with tempfile.TemporaryDirectory(prefix="payload-", dir=directory.parent) as temp:
+        payload = Path(temp) / "payload.bin"
+        ver_header.strip(package, payload)
+        with tarfile.open(payload, "r:bz2") as archive:
+            extract_members(archive, directory)
     debs = list(directory.glob("*.deb"))
     if len(debs) != 1:
         raise ValueError("Expected exactly one deb payload")
