@@ -1,94 +1,74 @@
 #!/usr/bin/env bash
-# 与 hs411 一样：编译 -> 收集安装产物 -> vergen.sh 生成版本包。
-# 用法：bash version/autogen.sh 1.0.0 [arm64|amd64]，默认 arm64。
-# 在 x86_64 上生成 arm64 包时，自动读取 cross.conf 并启用交叉编译。
-set -e
-repo="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-version="${1:?Usage: bash version/autogen.sh VERSION [arm64|amd64]}"
-arch="${2:-arm64}"
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+~][A-Za-z0-9.]+)?$ ]] || {
-  echo "Version must look like 1.0.0 or 1.0.0+build1" >&2; exit 2;
-}
-[[ "$arch" == arm64 || "$arch" == amd64 ]] || exit 2
-host_arch="$(dpkg --print-architecture)"
-cross=false
-if [[ "$host_arch" != "$arch" ]]; then
-  [[ "$host_arch" == amd64 && "$arch" == arm64 ]] || {
-    echo "Unsupported cross build: $host_arch -> $arch" >&2
-    exit 2
-  }
-  cross=true
-  source "$repo/version/cross.conf"
-  if [[ ! -d "$CAR_SYSROOT/opt/ros/jazzy" ]]; then
-    echo "Missing ARM64 sysroot: $CAR_SYSROOT" >&2
-    echo "/opt/ros/jazzy alone is not a sysroot. Run version/build_sysroot.sh first." >&2
-    exit 2
-  fi
-  CAR_SYSROOT="$(realpath -e "$CAR_SYSROOT")"
-  # Ubuntu 的 libstdc++.so 开发链接通常位于目标 GCC 目录，而非 multiarch 根目录。
-  CAR_TARGET_GCC_LIBDIR="$(find "$CAR_SYSROOT/usr/lib/gcc/aarch64-linux-gnu" \
-    -name libstdc++.so -print 2>/dev/null | sort -V | tail -n 1)"
-  if [[ -z "$CAR_TARGET_GCC_LIBDIR" ]]; then
-    echo "Missing target libstdc++.so. Install g++ on the board and resync its /usr." >&2
-    exit 2
-  fi
-  CAR_TARGET_GCC_LIBDIR="$(dirname -- "$CAR_TARGET_GCC_LIBDIR")"
-  export CAR_SYSROOT CAR_CROSS_PREFIX CAR_TARGET_GCC_LIBDIR
+set -eo pipefail
+if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
+  echo "用法: bash version/autogen.sh VERSION [arm64|amd64]"
+  exit 0
 fi
-# 主机 ROS 只提供 ament/Python 构建工具；交叉构建的库由 toolchain 指向 sysroot。
+[[ $# -ge 1 && $# -le 2 ]] || { echo "用法: bash version/autogen.sh VERSION [arm64|amd64]" >&2; exit 2; }
+version="$1"
+arch="${2:-arm64}"
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+~][A-Za-z0-9.]+)?$ && ${#version} -lt 32 ]] || {
+  echo "无效版本号（示例 1.0.0，最多 31 字符）: $version" >&2; exit 2;
+}
+[[ "$arch" == arm64 || "$arch" == amd64 ]] || { echo "架构只能是 arm64 或 amd64" >&2; exit 2; }
+repo="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo"
 source /opt/ros/jazzy/setup.bash
-# 将提交号写入程序；有未提交修改时追加 dirty 标记，便于追溯版本。
-commit="$(git -C "$repo" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
-if ! git -C "$repo" diff --quiet 2>/dev/null || \
-   [[ -n "$(git -C "$repo" ls-files --others --exclude-standard)" ]]; then
+commit="$(git rev-parse --short=12 HEAD)"
+if ! git diff --quiet HEAD -- || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
   commit="$commit-dirty"
 fi
-# 每次使用独立目录，避免把 symlink-install 或旧版本文件打进发布包。
-# 构建树放在 version/tmp 下，target/ 只保留最终的安装产物副本（与产线工程一致）。
-mkdir -p "$repo/version/tmp"
-# 暂存树里带着安装好的 package.xml，colcon 会当成重复包，这里按 target/ 的做法屏蔽。
-touch "$repo/version/tmp/COLCON_IGNORE"
-stage="$(mktemp -d "$repo/version/tmp/build.XXXXXX")"
-# 与产线工程一致：每次构建清空 out/，里面只保留本次产物。
-rm -rf "$repo/version/out"
-mkdir -p "$repo/version/out"
-mkdir -p "$repo/target"
-touch "$repo/target/COLCON_IGNORE"
-cmake_args=(-DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+strip_tool=strip
+cmake_args=(-DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
   "-DCAR_VERSION=$version" "-DCAR_GIT_COMMIT=$commit")
-if [[ "$cross" == true ]]; then
-  bash "$repo/version/check_cross.sh" "$stage/probe"
-  # 用主机编译器运行可移植逻辑/更新器/daemon 测试，不执行 ARM 二进制。
-  cmake -S "$repo/src/tb6612_car_ros2/test" -B "$stage/host-tests" \
-    -DCMAKE_CXX_COMPILER=/usr/bin/g++ -DCMAKE_BUILD_TYPE=Release
-  cmake --build "$stage/host-tests" --parallel
-  ctest --test-dir "$stage/host-tests" --output-on-failure
-  cmake_args+=(-DBUILD_TESTING=OFF
-    "-DCMAKE_TOOLCHAIN_FILE=$repo/cmake/toolchain_aarch64.cmake")
-  export AMENT_PREFIX_PATH="$CAR_SYSROOT/opt/ros/jazzy"
-  export CMAKE_PREFIX_PATH="$CAR_SYSROOT/opt/ros/jazzy"
+host_arch="$(dpkg --print-architecture)"
+if [[ "$host_arch" != "$arch" ]]; then
+  [[ "$host_arch" == amd64 && "$arch" == arm64 ]] || {
+    echo "仅支持本机编译或 amd64 -> arm64 交叉编译" >&2; exit 2;
+  }
+  source "$repo/version/cross.conf"
+  CAR_SYSROOT="$(realpath -e "$CAR_SYSROOT")"
+  target_library="$(find "$CAR_SYSROOT/usr/lib/gcc/aarch64-linux-gnu" -name libstdc++.so | sort -V | tail -n 1)"
+  [[ -n "$target_library" && -d "$CAR_SYSROOT/opt/ros/jazzy" ]] || {
+    echo "sysroot 缺少 GCC 开发库或 ROS Jazzy: $CAR_SYSROOT" >&2; exit 1;
+  }
+  CAR_TARGET_GCC_LIBDIR="$(dirname -- "$target_library")"
+  export CAR_SYSROOT CAR_CROSS_PREFIX CAR_TARGET_GCC_LIBDIR
+  export AMENT_PREFIX_PATH="$CAR_SYSROOT/opt/ros/jazzy" CMAKE_PREFIX_PATH="$CAR_SYSROOT/opt/ros/jazzy"
   unset AMENT_CURRENT_PREFIX
-fi
-cd "$repo"
-colcon --log-base "$stage/log" build \
-  --base-paths "$repo/src/tb6612_car_ros2" \
-  --packages-select tb6612_car_ros2 \
-  --build-base "$stage/build" --install-base "$stage/install" \
-  --cmake-args "${cmake_args[@]}"
-# 与产线工程一致：target/ 下留一份已 strip 的安装产物，进程可直接取用。
-package_dir="$repo/target/tb6612_car_ros2"
-rm -rf "$package_dir"
-cp -aL "$stage/install/tb6612_car_ros2" "$package_dir"
-strip_tool="strip"
-if [[ "$cross" == true ]]; then
+  cmake_args+=("-DCMAKE_TOOLCHAIN_FILE=$repo/cmake/toolchain_aarch64.cmake")
   strip_tool="${CAR_CROSS_PREFIX}strip"
 fi
-if command -v "$strip_tool" >/dev/null 2>&1; then
-  find "$package_dir/lib/tb6612_car_ros2" -maxdepth 1 -type f -exec "$strip_tool" {} +
-fi
-# 测试通过后才打包，任何一步失败都会停止后续发布步骤。
-if [[ "$cross" == false ]]; then
-  ctest --test-dir "$stage/build/tb6612_car_ros2" --output-on-failure
-fi
-bash "$repo/version/vergen.sh" "$version" "$arch" "$stage/install/tb6612_car_ros2" "$commit"
-echo "Build tree retained for diagnosis: $stage"
+command -v "$strip_tool" >/dev/null
+mkdir -p version/tmp target
+touch version/tmp/COLCON_IGNORE target/COLCON_IGNORE
+stage="$(mktemp -d "$repo/version/tmp/build.XXXXXX")"
+trap 'echo "构建失败，日志目录: $stage" >&2' ERR
+
+echo "[1/3] 测试"
+cmake -S src/tb6612_car_ros2/test -B "$stage/tests" -DCMAKE_CXX_COMPILER=/usr/bin/g++ -DCMAKE_BUILD_TYPE=Release
+cmake --build "$stage/tests" --parallel
+ctest --test-dir "$stage/tests" --output-on-failure
+
+echo "[2/3] 编译 $version / $arch"
+colcon --log-base "$stage/log" build --base-paths src/tb6612_car_ros2 \
+  --packages-select tb6612_car_ros2 --build-base "$stage/build" --install-base "$stage/install" \
+  --cmake-args "${cmake_args[@]}"
+for executable in car_daemon keyboard_teleop web_teleop; do
+  "$strip_tool" "$stage/install/tb6612_car_ros2/lib/tb6612_car_ros2/$executable"
+done
+rm -rf "$repo/target/tb6612_car_ros2"
+cp -aL "$stage/install/tb6612_car_ros2" "$repo/target/tb6612_car_ros2"
+python3 - "$repo/target/version.json" "$version" "$arch" "$commit" <<'PY'
+import datetime, json, sys
+from pathlib import Path
+Path(sys.argv[1]).write_text(json.dumps({
+    "product": "tb6612-car", "version": sys.argv[2], "architecture": sys.argv[3],
+    "commit": sys.argv[4], "ros_distro": "jazzy", "format": 1,
+    "built_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+}, indent=2) + "\n", encoding="utf-8")
+PY
+
+echo "[3/3] 打包"
+bash "$repo/version/vergen.sh"
+echo "构建日志: $stage"

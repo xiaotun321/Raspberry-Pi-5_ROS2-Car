@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
-# 原子投递升级包；默认只上传，显式 --reboot 才重启开发板。
-# 用法：bash scripts/deploy.sh 本地版本包 用户名@开发板IP [--reboot]
-# 版本包可以是未加头的 .bin、带头信息的 .bivi，或旧格式的 .ver。
-# 前提：开发板已完成 bootstrap，远端用户可使用 sudo。
-set -e
-package="${1:?Usage: deploy.sh FILE USER@BOARD [--reboot]}"
-board="${2:?}"
+set -eo pipefail
+usage() {
+  echo "用法: bash scripts/deploy.sh FILE USER@BOARD [--reboot]"
+}
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then usage; exit 0; fi
+[[ $# -ge 2 && $# -le 3 ]] || { usage >&2; exit 2; }
+package="$1"
+board="$2"
 action="${3:-}"
-[[ $# -le 3 && ( -z "$action" || "$action" == --reboot ) ]] || exit 2
-[[ -f "$package" && ( "$package" == *.bin || "$package" == *.bivi || "$package" == *.ver ) ]] || exit 2
-# 限定 SSH 目标格式，避免把参数误解释为选项或远端命令。
-[[ "$board" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || exit 2
-# 先传到普通用户可写的临时文件，避免更新器读取尚未传完的包。
+[[ -z "$action" || "$action" == --reboot ]] || { usage >&2; exit 2; }
+[[ -f "$package" && ( "$package" == *.bin || "$package" == *.bivi || "$package" == *.ver ) ]] || {
+  echo "请提供已生成的 .bin、.bivi 或旧格式 .ver 文件: $package" >&2; exit 2;
+}
+[[ "$board" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || {
+  echo "开发板地址格式应为 USER@HOST，例如 pi@192.168.1.10" >&2; exit 2;
+}
 remote="$(ssh "$board" 'mktemp /tmp/tb6612-upload.XXXXXXXX.ver')"
 [[ "$remote" =~ ^/tmp/tb6612-upload\.[A-Za-z0-9]+\.ver$ ]] || exit 1
 scp -- "$package" "$board:$remote"
-# sudo 在远端终端提示密码；完整复制并 sync 后才公开 1.ver。
 ssh -t "$board" "sudo bash -c '
 set -e
 test -d /work/app/tmp/ver

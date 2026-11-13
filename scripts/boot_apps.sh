@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
-# 发布版入口：无参数时启动守护进程；--check 仅检查本地运行依赖。
-# 通常由 systemd 调用，升级器在切换版本前调用 --check。
 set -e
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  echo "用法: bash boot_apps.sh [--check]（在开发板发布目录运行）"
+  echo "无参数: 启动 daemon 守护 Agent；--check: 仅检查依赖，不启动控制进程。"
+  exit 0
+fi
+[[ $# == 0 || ( $# == 1 && "$1" == --check ) ]] || {
+  echo "用法: bash boot_apps.sh [--check]" >&2; exit 2;
+}
 source "$(dirname -- "${BASH_SOURCE[0]}")/runtime_env.sh"
-car_bin="$CAR_RELEASE_DIR/ros/tb6612_car_ros2/lib/tb6612_car_ros2"
+car_bin="$CAR_RELEASE_DIR"
 
-# 升级激活前检查动态库、可执行架构和 Agent 依赖，不启动电机控制。
 if [[ "${1:-}" == --check ]]; then
-  "$car_bin/car_daemon" --version
-  "$car_bin/keyboard_teleop" --version
-  "$car_bin/web_teleop" --version
+  for executable in car_daemon keyboard_teleop web_teleop; do
+    "$car_bin/$executable" --version
+  done
   agent_prefix="$(ros2 pkg prefix micro_ros_agent)"
   agent_executable="$agent_prefix/lib/micro_ros_agent/micro_ros_agent"
   [[ -x "$agent_executable" ]] || exit 1
@@ -25,7 +30,6 @@ if [[ "${1:-}" == --check ]]; then
 fi
 
 mkdir -p "$ROS_LOG_DIR"
-# 只守护不需要交互终端的 Agent；keyboard_teleop 通过 carctl teleop 启动。
 exec "$car_bin/car_daemon" \
   --lock "${CAR_DAEMON_LOCK:-/run/tb6612-car.lock}" \
   -- /bin/bash "$CAR_RELEASE_DIR/agent.sh"

@@ -1,7 +1,9 @@
 [Unit]
 Description=TB6612 ROS 2 car web control
 Wants=network-online.target
-After=network-online.target
+After=network-online.target tb6612-car.service
+Requires=tb6612-car.service
+PartOf=tb6612-car.service
 RequiresMountsFor=/work
 
 [Service]
